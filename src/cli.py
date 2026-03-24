@@ -112,6 +112,64 @@ def _format_live_event(event: EventRecord) -> str:
     return f"[{event.received_at}] {event.event_type} {json.dumps(payload, default=str, ensure_ascii=True)}"
 
 
+def _extract_message_entries(turn: TurnRecord) -> list[tuple[str, str]]:
+    return _extract_message_entries_from_payload(turn.raw_turn, fallback_turn_id=turn.turn_id)
+
+
+def _extract_message_entries_from_payload(turn_payload: dict[str, Any], *, fallback_turn_id: str = "") -> list[tuple[str, str]]:
+    messages: list[tuple[str, str]] = []
+    turn_id = str(turn_payload.get("id") or fallback_turn_id)
+    for item in turn_payload.get("items", []):
+        item_id = str(item.get("id") or "")
+        item_type = item.get("type")
+        if item_type == "userMessage":
+            content = item.get("content", [])
+            text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+            text = "".join(text_parts).strip()
+            if text:
+                messages.append((f"{turn_id}:{item_id}:user", f"user: {text}"))
+        elif item_type == "agentMessage":
+            text = (item.get("text") or "").strip()
+            if text:
+                phase = item.get("phase")
+                prefix = "assistant"
+                if phase:
+                    prefix = f"assistant/{phase}"
+                messages.append((f"{turn_id}:{item_id}:assistant", f"{prefix}: {text}"))
+    return messages
+
+
+def _extract_live_message_entry(event: EventRecord) -> tuple[str, str] | None:
+    payload = event.payload_json
+
+    if event.event_type == "item/agentMessage/delta":
+        delta = str(payload.get("delta") or "").strip()
+        if delta:
+            return (f"live:{event.id}", f"assistant/live: {delta}")
+
+    msg_payload = payload.get("msg")
+    if isinstance(msg_payload, dict):
+        msg_type = str(msg_payload.get("type") or "")
+        text = str(msg_payload.get("text") or msg_payload.get("delta") or "").strip()
+        if text and "agent" in msg_type:
+            return (f"live:{event.id}", f"assistant/live: {text}")
+        if text and "user" in msg_type:
+            return (f"live:{event.id}", f"user/live: {text}")
+
+    item_payload = payload.get("item")
+    if isinstance(item_payload, dict):
+        item_type = str(item_payload.get("type") or "")
+        if item_type in {"userMessage", "agentMessage"}:
+            entries = _extract_message_entries_from_payload(
+                {"id": event.turn_id or "", "items": [item_payload]},
+                fallback_turn_id=event.turn_id or "",
+            )
+            if entries:
+                return entries[0]
+
+    return None
+
+
 @app.command(help="Connect to the local Codex App Server and initialize the client session.")
 def connect(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
@@ -246,11 +304,12 @@ def tail(
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command(help="Replay recent thread events, then resume the thread and print live events as they arrive.")
+@app.command(help="Replay recent thread messages, then resume the thread and print newly detected live messages.")
 def listen(
     thread_id: str,
     max_events: Annotated[int | None, typer.Option("--max-events", help="Stop after this many events.")] = None,
-    no_history: Annotated[bool, typer.Option("--no-history", help="Skip replaying recent known events before listening.")] = False,
+    no_history: Annotated[bool, typer.Option("--no-history", help="Skip replaying recent thread messages before listening.")] = False,
+    history_limit: Annotated[int, typer.Option("--history-limit", help="Number of most recent messages to replay before listening.")] = 20,
     config: ConfigOption = None,
     data_dir: DataDirOption = None,
     server_cmd: ServerCmdOption = None,
@@ -258,11 +317,64 @@ def listen(
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
         console.print(f"Listening on thread {thread_id}")
+        seen_message_ids: set[str] = set()
+
+        async def collect_messages() -> list[tuple[str, str]]:
+            thread = await service.read_thread(thread_id, include_turns=True)
+            messages: list[tuple[str, str]] = []
+            raw_turns = thread.raw_thread.get("turns", [])
+            if isinstance(raw_turns, list) and raw_turns:
+                for turn_payload in raw_turns:
+                    if isinstance(turn_payload, dict):
+                        messages.extend(_extract_message_entries_from_payload(turn_payload))
+                return messages
+            turns = list(reversed(service.registry.list_turns(thread_id=thread_id)))
+            for turn in turns:
+                messages.extend(_extract_message_entries(turn))
+            return messages
+
+        async def sync_messages(*, print_history: bool) -> int:
+            printed = 0
+            messages = await collect_messages()
+            already_seen = set(seen_message_ids)
+            if print_history and history_limit > 0:
+                for message_id, _ in messages:
+                    seen_message_ids.add(message_id)
+                for message_id, text in messages[-history_limit:]:
+                    if message_id in already_seen:
+                        continue
+                    console.print(text)
+                    printed += 1
+                return printed
+            for message_id, text in messages:
+                if message_id in seen_message_ids:
+                    continue
+                console.print(text)
+                seen_message_ids.add(message_id)
+                printed += 1
+            return printed
+
+        if not no_history:
+            await sync_messages(print_history=True)
+        else:
+            messages = await collect_messages()
+            for message_id, _ in messages:
+                seen_message_ids.add(message_id)
+
+        async def on_event(event: EventRecord) -> None:
+            live_message = _extract_live_message_entry(event)
+            if live_message is not None:
+                message_id, text = live_message
+                if message_id not in seen_message_ids:
+                    console.print(text)
+                    seen_message_ids.add(message_id)
+                return
+            await sync_messages(print_history=False)
+
         await service.listen(
             thread_id,
-            lambda event: console.print(_format_live_event(event)),
+            on_event,
             max_events=max_events,
-            include_history=not no_history,
         )
 
     _run(_execute_with_service(config, data_dir, server_cmd, operation))

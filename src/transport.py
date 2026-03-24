@@ -200,9 +200,9 @@ class StdioJsonRpcTransport:
             del self._stderr_buffer[: newline_index + 1]
             decoded = line.decode("utf-8", errors="replace").rstrip()
             if decoded:
-                logger.warning("app_server_stderr", extra={"line": decoded})
+                logger.debug("app_server_stderr", extra={"line": decoded})
         if final and self._stderr_buffer:
             decoded = self._stderr_buffer.decode("utf-8", errors="replace").rstrip()
             self._stderr_buffer.clear()
             if decoded:
-                logger.warning("app_server_stderr", extra={"line": decoded})
+                logger.debug("app_server_stderr", extra={"line": decoded})

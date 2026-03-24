@@ -186,11 +186,12 @@ class EventIngestor:
                 self._registry.save_thread(thread.model_copy(update={"last_seen_at": event.received_at}))
 
     def _extract_ids(self, method: str, params: dict[str, Any]) -> tuple[str | None, str | None]:
-        thread_id = params.get("threadId")
+        thread_id = params.get("threadId") or params.get("conversationId")
         turn_id = params.get("turnId")
         thread_payload = params.get("thread")
         turn_payload = params.get("turn")
         item_payload = params.get("item")
+        msg_payload = params.get("msg")
 
         if thread_id is None and isinstance(thread_payload, dict):
             thread_id = thread_payload.get("id")
@@ -202,6 +203,8 @@ class EventIngestor:
             turn_id = item_payload.get("turnId")
         if thread_id is None and isinstance(item_payload, dict):
             thread_id = item_payload.get("threadId")
+        if thread_id is None and isinstance(msg_payload, dict):
+            thread_id = msg_payload.get("threadId") or msg_payload.get("conversationId")
         if thread_id is None and turn_id is not None:
             known_turn = self._registry.get_turn(turn_id)
             if known_turn is not None:

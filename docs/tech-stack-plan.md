@@ -48,6 +48,8 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 - Typer provides the CLI command structure.
 - Rich is used for `threads`, `inspect`, `status`, `doctor`, `tail`, and `listen` output.
 - Human-readable local output is the default in v0.
+- `listen` should prioritize recent actual thread message history before printing newly detected messages, and it should suppress older backlog replay after the initial history window has been shown.
+- stderr noise from the App Server should stay out of normal operator output unless debug logging is enabled.
 - JSON output can be added later for scripting, but it is not the default.
 
 ### Configuration

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Iterable, TypeVar
 
@@ -98,10 +99,10 @@ class JsonRegistry:
 
     def _atomic_write(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(path.suffix + ".tmp")
-        with temp_path.open("w", encoding="utf-8") as handle:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
             json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
             handle.write("\n")
+            temp_path = Path(handle.name)
         temp_path.replace(path)
 
     def _load_model(self, path: Path, model_type: type[T]) -> T | None:

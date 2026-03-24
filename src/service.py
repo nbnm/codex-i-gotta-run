@@ -153,10 +153,9 @@ class OrchestratorService:
     async def listen(
         self,
         thread_id: str,
-        on_event: Callable[[EventRecord], None],
+        on_event: Callable[[EventRecord], Any],
         *,
         max_events: int | None = None,
-        include_history: bool = True,
     ) -> int:
         queue: asyncio.Queue[EventRecord] = asyncio.Queue()
 
@@ -165,23 +164,14 @@ class OrchestratorService:
                 queue.put_nowait(event)
 
         seen = 0
-        seen_event_ids: set[str] = set()
-        if include_history:
-            for event in self.recent_events(thread_id):
-                on_event(event)
-                seen_event_ids.add(event.id)
-                seen += 1
-                if max_events is not None and seen >= max_events:
-                    return seen
         unsubscribe = self.ingestor.subscribe(listener)
         try:
             await self.resume_thread(thread_id)
             while max_events is None or seen < max_events:
                 event = await queue.get()
-                if event.id in seen_event_ids:
-                    continue
-                on_event(event)
-                seen_event_ids.add(event.id)
+                result = on_event(event)
+                if asyncio.iscoroutine(result):
+                    await result
                 seen += 1
         finally:
             unsubscribe()

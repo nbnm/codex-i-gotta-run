@@ -138,7 +138,13 @@ def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: 
             "id": turn_id,
             "threadId": thread["id"],
             "status": "inProgress",
-            "items": [],
+            "items": [
+                {
+                    "id": next_id(state, "item"),
+                    "type": "userMessage",
+                    "content": [{"type": "text", "text": text}],
+                }
+            ],
             "error": None,
             "summary": None,
         }
@@ -157,6 +163,14 @@ def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: 
             }
         )
         if not hold:
+            turn["items"].append(
+                {
+                    "id": next_id(state, "item"),
+                    "type": "agentMessage",
+                    "phase": "commentary",
+                    "text": f"working on: {text}",
+                }
+            )
             turn["status"] = "completed"
             turn["summary"] = f"Completed: {text}"
             thread["status"] = {"type": "idle"}
@@ -175,6 +189,13 @@ def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: 
             return error_response(request_id, 409, "expectedTurnId mismatch"), initialized
         turn = state["turns"][expected_turn_id]
         steer_text = params["input"][0]["text"]
+        turn["items"].append(
+            {
+                "id": next_id(state, "item"),
+                "type": "userMessage",
+                "content": [{"type": "text", "text": steer_text}],
+            }
+        )
         emit(
             {
                 "method": "item/agentMessage/delta",
@@ -182,6 +203,14 @@ def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: 
             }
         )
         if "finish" in steer_text.lower():
+            turn["items"].append(
+                {
+                    "id": next_id(state, "item"),
+                    "type": "agentMessage",
+                    "phase": "commentary",
+                    "text": f"steer: {steer_text}",
+                }
+            )
             turn["status"] = "completed"
             turn["summary"] = f"Completed after steer: {steer_text}"
             thread["status"] = {"type": "idle"}
