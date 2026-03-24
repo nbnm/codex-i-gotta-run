@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from codex_thread_orchestrator.adapter import AppServerAdapter
-from codex_thread_orchestrator.ingestion import EventIngestor
-from codex_thread_orchestrator.models import QueuedInputRecord, ThreadRecord, utc_now_iso
-from codex_thread_orchestrator.registry import JsonRegistry
+from adapter import AppServerAdapter
+from ingestion import EventIngestor
+from models import QueuedInputRecord, ThreadRecord, utc_now_iso
+from registry import JsonRegistry
 
 
 class SteeringError(RuntimeError):
@@ -87,4 +87,3 @@ class SteeringEngine:
         if thread.active_turn_id or thread.status_type != "active":
             return thread
         raise SteeringError("Thread is active but no active turn id is known; refusing to guess.")
-

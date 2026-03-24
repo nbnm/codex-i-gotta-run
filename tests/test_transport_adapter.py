@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from codex_thread_orchestrator.config import load_config
-from codex_thread_orchestrator.service import OrchestratorService
+from config import load_config
+from service import OrchestratorService
 
 
 @pytest.mark.asyncio
@@ -56,3 +56,20 @@ async def test_autosteer_uses_active_turn(tmp_path: Path, monkeypatch: pytest.Mo
     finally:
         await service.close()
 
+
+@pytest.mark.asyncio
+async def test_resume_thread_handles_large_jsonl_messages(tmp_path: Path) -> None:
+    config = load_config(
+        data_dir=tmp_path / "registry",
+        server_cmd=[sys.executable, "-m", "tests.huge_line_server"],
+    )
+    service = OrchestratorService(config)
+    try:
+        await service.connect()
+        thread = await service.resume_thread("thr_large")
+        assert thread.thread_id == "thr_large"
+        assert thread.cwd == "/tmp/huge-thread"
+        assert thread.preview is not None
+        assert len(thread.preview) == 200_000
+    finally:
+        await service.close()

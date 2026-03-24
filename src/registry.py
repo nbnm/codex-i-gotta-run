@@ -6,7 +6,7 @@ from typing import Iterable, TypeVar
 
 from pydantic import BaseModel
 
-from codex_thread_orchestrator.models import ConnectionState, EventRecord, QueuedInputRecord, ThreadRecord, TurnRecord
+from models import ConnectionState, EventRecord, QueuedInputRecord, ThreadRecord, TurnRecord
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -117,4 +117,3 @@ class JsonRegistry:
             if loaded is not None:
                 items.append(loaded)
         return items
-

@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from codex_thread_orchestrator.config import AppConfig
-from codex_thread_orchestrator.models import (
+from config import AppConfig
+from models import (
     InitializeResponse,
     ListThreadsResponse,
     SteerResult,
@@ -12,7 +12,7 @@ from codex_thread_orchestrator.models import (
     TurnEnvelope,
     UnsubscribeResult,
 )
-from codex_thread_orchestrator.transport import StdioJsonRpcTransport
+from transport import StdioJsonRpcTransport
 
 NotificationCallback = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
@@ -99,4 +99,3 @@ class AppServerAdapter:
             result = callback(method, params)
             if hasattr(result, "__await__"):
                 await result
-

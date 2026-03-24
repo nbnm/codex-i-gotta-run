@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from codex_thread_orchestrator.adapter import AppServerAdapter
-from codex_thread_orchestrator.config import AppConfig
-from codex_thread_orchestrator.ingestion import EventIngestor
-from codex_thread_orchestrator.models import ConnectionState, EventRecord, QueuedInputRecord, ThreadRecord, TurnRecord, utc_now_iso
-from codex_thread_orchestrator.registry import JsonRegistry
-from codex_thread_orchestrator.steering import SteeringDecision, SteeringEngine
-from codex_thread_orchestrator.transport import StdioJsonRpcTransport
+from adapter import AppServerAdapter
+from config import AppConfig
+from ingestion import EventIngestor
+from models import ConnectionState, EventRecord, QueuedInputRecord, ThreadRecord, TurnRecord, utc_now_iso
+from registry import JsonRegistry
+from steering import SteeringDecision, SteeringEngine
+from transport import StdioJsonRpcTransport
 
 
 @dataclass(slots=True)
@@ -145,6 +146,46 @@ class OrchestratorService:
         finally:
             unsubscribe()
         return events
+
+    def recent_events(self, thread_id: str, *, limit: int | None = None) -> list[EventRecord]:
+        return self.registry.list_events(thread_id=thread_id, limit=limit or self.config.recent_event_limit)
+
+    async def listen(
+        self,
+        thread_id: str,
+        on_event: Callable[[EventRecord], None],
+        *,
+        max_events: int | None = None,
+        include_history: bool = True,
+    ) -> int:
+        queue: asyncio.Queue[EventRecord] = asyncio.Queue()
+
+        def listener(event: EventRecord) -> None:
+            if event.thread_id == thread_id:
+                queue.put_nowait(event)
+
+        seen = 0
+        seen_event_ids: set[str] = set()
+        if include_history:
+            for event in self.recent_events(thread_id):
+                on_event(event)
+                seen_event_ids.add(event.id)
+                seen += 1
+                if max_events is not None and seen >= max_events:
+                    return seen
+        unsubscribe = self.ingestor.subscribe(listener)
+        try:
+            await self.resume_thread(thread_id)
+            while max_events is None or seen < max_events:
+                event = await queue.get()
+                if event.id in seen_event_ids:
+                    continue
+                on_event(event)
+                seen_event_ids.add(event.id)
+                seen += 1
+        finally:
+            unsubscribe()
+        return seen
 
     async def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
         self.ingestor.handle_notification(method, params)

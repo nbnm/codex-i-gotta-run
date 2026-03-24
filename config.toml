@@ -1,0 +1,15 @@
+[server]
+command = ["codex", "app-server"]
+experimental_api = false
+opt_out_notification_methods = []
+
+[registry]
+data_dir = ".test-registry"
+
+[logging]
+level = "INFO"
+
+[client]
+name = "codex-i-gotta-run"
+title = "codex-i-gotta-run"
+version = "0.1.0"

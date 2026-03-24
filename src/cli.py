@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Annotated, Any
@@ -9,10 +10,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from codex_thread_orchestrator.config import load_config
-from codex_thread_orchestrator.logging_utils import configure_logging
-from codex_thread_orchestrator.models import EventRecord, ThreadRecord, TurnRecord
-from codex_thread_orchestrator.service import OrchestratorService
+from config import load_config
+from logging_utils import configure_logging
+from models import EventRecord, ThreadRecord, TurnRecord
+from service import OrchestratorService
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -48,15 +49,31 @@ async def _execute_with_service(
         await service.close()
 
 
-def _render_threads(rows: list[ThreadRecord]) -> None:
+def _turn_timestamp(turn: TurnRecord) -> str:
+    return turn.completed_at or turn.started_at or ""
+
+
+def _render_threads(rows: list[ThreadRecord], turns_by_thread: dict[str, list[TurnRecord]] | None = None) -> None:
     table = Table(title="Threads")
     table.add_column("Thread ID")
     table.add_column("Name")
+    table.add_column("Core Folder")
     table.add_column("Status")
+    table.add_column("Last Turn")
     table.add_column("Active Turn")
     table.add_column("Archived")
     for row in rows:
-        table.add_row(row.thread_id, row.name or "", row.status_type, row.active_turn_id or "", "yes" if row.archived else "no")
+        thread_turns = (turns_by_thread or {}).get(row.thread_id, [])
+        last_turn = _turn_timestamp(thread_turns[0]) if thread_turns else ""
+        table.add_row(
+            row.thread_id,
+            row.name or "",
+            row.cwd or "",
+            row.status_type,
+            last_turn,
+            row.active_turn_id or "",
+            "yes" if row.archived else "no",
+        )
     console.print(table)
 
 
@@ -83,7 +100,19 @@ def _render_events(events: list[EventRecord]) -> None:
     console.print(table)
 
 
-@app.command()
+def _format_live_event(event: EventRecord) -> str:
+    payload = event.payload_json
+    if event.event_type == "item/agentMessage/delta" and "delta" in payload:
+        return f"[{event.received_at}] agent_message: {payload['delta']}"
+    if event.event_type == "turn/completed" and isinstance(payload.get("turn"), dict):
+        summary = payload["turn"].get("summary") or ""
+        return f"[{event.received_at}] turn/completed {event.turn_id or ''} {summary}".strip()
+    if event.event_type == "turn/started" and isinstance(payload.get("turn"), dict):
+        return f"[{event.received_at}] turn/started {payload['turn'].get('id', '')}".strip()
+    return f"[{event.received_at}] {event.event_type} {json.dumps(payload, default=str, ensure_ascii=True)}"
+
+
+@app.command(help="Connect to the local Codex App Server and initialize the client session.")
 def connect(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         state = await service.connect()
@@ -95,17 +124,18 @@ def connect(config: ConfigOption = None, data_dir: DataDirOption = None, server_
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="List known threads from the App Server and refresh the local registry cache.")
 def threads(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
         rows = await service.list_threads()
-        _render_threads(rows)
+        turns_by_thread = {row.thread_id: service.registry.list_turns(thread_id=row.thread_id) for row in rows}
+        _render_threads(rows, turns_by_thread)
 
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Show locally cached metadata, recent turns, and queued inputs for a thread.")
 def inspect(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     service = _build_service(config, data_dir, server_cmd)
     thread, turns, queue_items = service.inspect_local(thread_id)
@@ -120,7 +150,7 @@ def inspect(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption
         console.print(f"Queued inputs: {len(queue_items)}")
 
 
-@app.command()
+@app.command(help="Read a thread from the App Server and refresh its stored local snapshot.")
 def read(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
@@ -131,7 +161,7 @@ def read(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = 
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Resume a known thread so it becomes active on the App Server.")
 def resume(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
@@ -141,7 +171,7 @@ def resume(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption 
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Create a new thread and start its first turn with the provided prompt.")
 def start(prompt: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
@@ -151,7 +181,7 @@ def start(prompt: str, config: ConfigOption = None, data_dir: DataDirOption = No
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command(name="continue")
+@app.command(name="continue", help="Start the next turn on an existing thread after refreshing its current state.")
 def continue_(
     thread_id: str,
     prompt: str,
@@ -167,7 +197,7 @@ def continue_(
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Append more user input to an active in-flight turn with a known turn ID.")
 def steer(
     thread_id: str,
     turn_id: str,
@@ -184,7 +214,7 @@ def steer(
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Interrupt the currently active turn for a thread.")
 def interrupt(
     thread_id: str,
     turn_id: str,
@@ -200,7 +230,7 @@ def interrupt(
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Resume a thread and display its recent live events.")
 def tail(
     thread_id: str,
     max_events: Annotated[int | None, typer.Option("--max-events", help="Stop after this many events.")] = None,
@@ -216,7 +246,29 @@ def tail(
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Replay recent thread events, then resume the thread and print live events as they arrive.")
+def listen(
+    thread_id: str,
+    max_events: Annotated[int | None, typer.Option("--max-events", help="Stop after this many events.")] = None,
+    no_history: Annotated[bool, typer.Option("--no-history", help="Skip replaying recent known events before listening.")] = False,
+    config: ConfigOption = None,
+    data_dir: DataDirOption = None,
+    server_cmd: ServerCmdOption = None,
+) -> None:
+    async def operation(service: OrchestratorService) -> None:
+        await service.connect()
+        console.print(f"Listening on thread {thread_id}")
+        await service.listen(
+            thread_id,
+            lambda event: console.print(_format_live_event(event)),
+            max_events=max_events,
+            include_history=not no_history,
+        )
+
+    _run(_execute_with_service(config, data_dir, server_cmd, operation))
+
+
+@app.command(help="Persist a follow-up prompt in the local queue for later steering or continuation.")
 def queue(
     thread_id: str,
     prompt: str,
@@ -230,7 +282,7 @@ def queue(
     console.print(f"Queued {item.id} for thread {thread_id}")
 
 
-@app.command()
+@app.command(help="Process queued inputs for a thread using the v0 auto-steering rules.")
 def autosteer(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
@@ -248,7 +300,7 @@ def autosteer(thread_id: str, config: ConfigOption = None, data_dir: DataDirOpti
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
 
-@app.command()
+@app.command(help="Show local connection state, active turns, and queued input counts.")
 def status(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     service = _build_service(config, data_dir, server_cmd)
     snapshot = service.status_snapshot()
@@ -261,7 +313,7 @@ def status(config: ConfigOption = None, data_dir: DataDirOption = None, server_c
     console.print(f"Queued inputs: {len(snapshot['queued_inputs'])}")
 
 
-@app.command()
+@app.command(help="Validate local configuration and test connectivity to the Codex App Server.")
 def doctor(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         report = await service.doctor()

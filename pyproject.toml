@@ -1,8 +1,8 @@
 [project]
-name = "codex-thread-orchestrator"
+name = "codex-i-gotta-run"
 version = "0.1.0"
 description = "Local-only prototype sidecar for orchestrating Codex threads via the App Server."
-readme = "AGENTS.md"
+readme = "README.MD"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.11.0,<3",
@@ -17,11 +17,15 @@ dev = [
 ]
 
 [project.scripts]
-codex-thread-orchestrator = "codex_thread_orchestrator.cli:app"
+codex-i-gotta-run = "cli:app"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src"]
+sources = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

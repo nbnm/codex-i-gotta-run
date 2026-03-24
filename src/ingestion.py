@@ -4,8 +4,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from codex_thread_orchestrator.models import EventRecord, PlanEntry, ThreadRecord, TurnRecord, utc_now_iso
-from codex_thread_orchestrator.registry import JsonRegistry
+from models import EventRecord, PlanEntry, ThreadRecord, TurnRecord, utc_now_iso
+from registry import JsonRegistry
 
 
 EventSubscriber = Callable[[EventRecord], None]
@@ -211,4 +211,3 @@ class EventIngestor:
             if known_thread is not None:
                 turn_id = known_thread.active_turn_id
         return thread_id, turn_id
-

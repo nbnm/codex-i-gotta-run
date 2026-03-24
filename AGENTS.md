@@ -2,7 +2,7 @@
 
 ## Project mission
 
-Build a local-only prototype named `codex-thread-orchestrator`.
+Build a local-only prototype named `codex-i-gotta-run`.
 
 This prototype uses the Codex App Server as the primary control plane.
 
@@ -125,7 +125,7 @@ Document future ideas, but do not implement them.
 - Favor explicit typed domain models and conservative protocol adapters over dynamic or implicit behavior.
 
 Suggested repo layout:
-- `src/codex_thread_orchestrator/` for application code
+- `src/` for application code
 - `tests/` for unit and CLI tests
 - `docs/` for assumptions and design notes
 
@@ -286,6 +286,7 @@ Provide a minimal local CLI.
 Required commands:
 - `connect` - connect to App Server and initialize
 - `threads` - list known threads
+- `threads` output should include each thread's core folder (`cwd`) and latest known turn timestamp when available
 - `inspect <threadId>` - show known metadata and latest turn state
 - `read <threadId>` - fetch stored thread data from App Server
 - `resume <threadId>` - resume a thread into the active session
@@ -294,6 +295,7 @@ Required commands:
 - `steer <threadId> <turnId> "<prompt>"` - steer an active turn
 - `interrupt <threadId> <turnId>` - interrupt an active turn
 - `tail <threadId>` - stream formatted live events for a thread
+- `listen <threadId>` - print recent and live thread events to the local console as they arrive
 - `queue <threadId> "<prompt>"` - enqueue follow-up input
 - `autosteer <threadId>` - process queued inputs for a thread using v0 rules
 - `status` - show connection state, active turns, and queue state

@@ -9,20 +9,19 @@ from typing import Any
 
 from pydantic import Field
 
-from codex_thread_orchestrator.models import ClientInfo, Model
+from models import ClientInfo, Model
 
-
-ENV_PREFIX = "CODEX_THREAD_ORCHESTRATOR_"
+ENV_PREFIX = "CODEX_I_GOTTA_RUN_"
 
 
 def _default_data_dir() -> Path:
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "codex-thread-orchestrator"
+        return home / "Library" / "Application Support" / "codex-i-gotta-run"
     if sys.platform == "win32":
         appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
-        return appdata / "codex-thread-orchestrator"
-    return home / ".local" / "share" / "codex-thread-orchestrator"
+        return appdata / "codex-i-gotta-run"
+    return home / ".local" / "share" / "codex-i-gotta-run"
 
 
 class AppConfig(Model):

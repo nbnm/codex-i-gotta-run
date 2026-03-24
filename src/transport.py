@@ -7,7 +7,7 @@ from asyncio.subprocess import PIPE, Process
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from codex_thread_orchestrator.models import JsonRpcErrorPayload
+from models import JsonRpcErrorPayload
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,8 @@ class StdioJsonRpcTransport:
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._closed = False
+        self._stdout_buffer = bytearray()
+        self._stderr_buffer = bytearray()
 
     def add_notification_handler(self, handler: NotificationHandler) -> None:
         self._notification_handlers.append(handler)
@@ -116,16 +118,24 @@ class StdioJsonRpcTransport:
         assert self._process is not None and self._process.stdout is not None
         try:
             while True:
-                line = await self._process.stdout.readline()
-                if not line:
+                chunk = await self._process.stdout.read(65536)
+                if not chunk:
+                    await self._flush_stdout_buffer_on_close()
                     if self._closed:
                         return
                     raise TransportError("App Server stdout closed.")
-                raw = line.decode("utf-8").strip()
-                if not raw:
-                    continue
-                message = json.loads(raw)
-                await self._handle_message(message)
+                self._stdout_buffer.extend(chunk)
+                while True:
+                    newline_index = self._stdout_buffer.find(b"\n")
+                    if newline_index < 0:
+                        break
+                    line = bytes(self._stdout_buffer[:newline_index])
+                    del self._stdout_buffer[: newline_index + 1]
+                    raw = line.decode("utf-8").strip()
+                    if not raw:
+                        continue
+                    message = json.loads(raw)
+                    await self._handle_message(message)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -139,10 +149,12 @@ class StdioJsonRpcTransport:
         assert self._process is not None and self._process.stderr is not None
         try:
             while True:
-                line = await self._process.stderr.readline()
-                if not line:
+                chunk = await self._process.stderr.read(4096)
+                if not chunk:
+                    self._flush_stderr_lines(final=True)
                     return
-                logger.warning("app_server_stderr", extra={"line": line.decode("utf-8", errors="replace").rstrip()})
+                self._stderr_buffer.extend(chunk)
+                self._flush_stderr_lines()
         except asyncio.CancelledError:
             raise
 
@@ -168,3 +180,29 @@ class StdioJsonRpcTransport:
             return
 
         logger.warning("Unhandled JSON-RPC message", extra={"message": message})
+
+    async def _flush_stdout_buffer_on_close(self) -> None:
+        if not self._stdout_buffer:
+            return
+        raw = self._stdout_buffer.decode("utf-8").strip()
+        self._stdout_buffer.clear()
+        if not raw:
+            return
+        message = json.loads(raw)
+        await self._handle_message(message)
+
+    def _flush_stderr_lines(self, *, final: bool = False) -> None:
+        while True:
+            newline_index = self._stderr_buffer.find(b"\n")
+            if newline_index < 0:
+                break
+            line = bytes(self._stderr_buffer[:newline_index])
+            del self._stderr_buffer[: newline_index + 1]
+            decoded = line.decode("utf-8", errors="replace").rstrip()
+            if decoded:
+                logger.warning("app_server_stderr", extra={"line": decoded})
+        if final and self._stderr_buffer:
+            decoded = self._stderr_buffer.decode("utf-8", errors="replace").rstrip()
+            self._stderr_buffer.clear()
+            if decoded:
+                logger.warning("app_server_stderr", extra={"line": decoded})

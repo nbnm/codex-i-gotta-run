@@ -1,4 +1,4 @@
-# Tech Stack Plan For `codex-thread-orchestrator`
+# Tech Stack Plan For `codex-i-gotta-run`
 
 ## Summary
 
@@ -46,7 +46,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 ### Operator UX
 
 - Typer provides the CLI command structure.
-- Rich is used for `threads`, `inspect`, `status`, `doctor`, and `tail` output.
+- Rich is used for `threads`, `inspect`, `status`, `doctor`, `tail`, and `listen` output.
 - Human-readable local output is the default in v0.
 - JSON output can be added later for scripting, but it is not the default.
 
@@ -78,6 +78,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
   - `steer`
   - `interrupt`
   - `tail`
+  - `listen`
   - `queue`
   - `autosteer`
   - `status`
@@ -124,7 +125,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
   - interrupt only targets known active turn IDs
 - CLI tests:
   - command parsing
-  - human-readable status and tail output
+  - human-readable status, threads, tail, and listen output
   - operator error messages for missing config, missing thread, or uncertain state
 
 ## Assumptions And Defaults

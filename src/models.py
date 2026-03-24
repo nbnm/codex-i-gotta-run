@@ -15,8 +15,8 @@ class Model(BaseModel):
 
 
 class ClientInfo(Model):
-    name: str = "codex_thread_orchestrator"
-    title: str = "Codex Thread Orchestrator"
+    name: str = "codex-i-gotta-run"
+    title: str = "codex-i-gotta-run"
     version: str = "0.1.0"
 
 
@@ -148,4 +148,3 @@ class JsonRpcErrorPayload(Model):
     code: int
     message: str
     data: dict[str, Any] | None = None
-
