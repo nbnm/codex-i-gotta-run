@@ -2,7 +2,7 @@
 
 ## Summary
 
-Use a local-first Python stack optimized for deterministic behavior, explicit state transitions, and easy debugging.
+Use a local-only Python stack optimized for deterministic behavior, explicit state transitions, and easy debugging.
 
 - Language and runtime: Python 3.12+
 - Project tooling: `uv` with `pyproject.toml`
@@ -11,7 +11,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 - Validation and models: Pydantic v2
 - Persistence: JSON files with projected snapshots and an append-only event log
 - Logging: structured stdlib `logging`
-- Config: local TOML config with `--config` selection and code defaults
+- Config: local TOML config file with `--config` selection and code defaults
 - Tests: `pytest` with an in-process fake JSON-RPC App Server over `stdio`
 
 ## Key Stack Decisions
@@ -20,6 +20,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 
 - Implement JSON-RPC over `stdio` first.
 - The sidecar spawns a configured local Codex App Server command and owns lifecycle, reconnect, and graceful shutdown.
+- The stack does not target remote App Server endpoints.
 - Use `asyncio.subprocess` for process I/O.
 - Use `asyncio` tasks for request correlation, notification handling, and shutdown coordination.
 
@@ -55,6 +56,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 ### Configuration
 
 - Runtime settings come from a TOML config file, optionally selected with `--config`.
+- Environment variables are not used as a runtime configuration layer.
 - Config must cover at least:
   - App Server spawn command and args
   - local data directory
@@ -120,8 +122,8 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 
 ## Assumptions And Defaults
 
-- v0 remains single-user, local-only, and intentionally non-production.
-- `asyncio` is sufficient; no daemon and worker split is planned for v0.
+- The current scope remains single-user and local-only.
+- `asyncio` is sufficient; no daemon and worker split is planned in the current scope.
 - JSON files are acceptable because the App Server is the source of truth, not the local registry.
 - The first transport is `stdio`; WebSocket remains a later extension.
 - Any unclear Codex App Server behavior must be documented in `docs/assumptions.md` rather than silently codified.

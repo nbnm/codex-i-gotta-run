@@ -2,21 +2,20 @@
 
 ## Project mission
 
-Build a local-only prototype named `codex-i-gotta-run`.
+Build a local-only tool named `codex-i-gotta-run`.
 
-This prototype uses the Codex App Server as the primary control plane.
+This tool uses a local Codex App Server as the primary control plane.
 
-The prototype must:
-- connect to a local Codex App Server
+The tool must:
+- connect only to a local Codex App Server
 - discover and track Codex threads through App Server APIs
 - observe live thread and turn events
 - resume existing threads
 - start new turns on known threads
 - steer active in-flight turns
 - persist enough local state to recover after restarts
-- exclude Telegram integration for v0
 
-This repository is for a prototype, not a production service.
+This repository is for a single-user local workflow, not a cloud service.
 
 ## Product definition
 
@@ -51,8 +50,7 @@ Do not design around `.codex/sessions` as the main API.
 - Do not infer active state from file mtimes.
 - Do not guess thread state when the App Server can answer directly.
 - Prefer explicit `threadId` and `turnId` values over heuristics.
-- Keep the prototype single-user and local-first.
-- Skip Telegram entirely in v0.
+- Keep the tool single-user and local-first.
 - Skip cloud deployment in v0.
 - Skip browser UI in v0 unless specifically requested later.
 - Favor deterministic behavior over "smart" autonomy.
@@ -66,9 +64,9 @@ When Codex behavior is unclear:
 
 If an API shape is uncertain, do not invent behavior silently. Document the uncertainty.
 
-## v0 goals
+## Current goals
 
-The prototype is successful if it can:
+The current local-only tool is successful if it can:
 
 1. connect to a local Codex App Server
 2. initialize a session correctly
@@ -82,7 +80,6 @@ The prototype is successful if it can:
 ## Out of scope for v0
 
 Do not build these yet:
-- Telegram integration
 - Slack integration
 - webhooks
 - browser frontend
@@ -118,7 +115,8 @@ Document future ideas, but do not implement them.
 - Tests: `pytest`.
 - Logging: structured stdlib `logging`.
 - Runtime model: one local async `asyncio` process for transport, ingestion, and command execution.
-- Configuration source: local TOML config selected by CLI, then code defaults.
+- Configuration source: local TOML config file selected by CLI, then code defaults.
+- Environment variables are not part of runtime configuration.
 - Favor explicit typed domain models and conservative protocol adapters over dynamic or implicit behavior.
 
 Suggested repo layout:
@@ -270,7 +268,7 @@ Required commands:
 - `listen <threadId>` - print recent thread messages first, then newly detected messages to the local console; support skipping history and limiting replay depth when requested, without replaying the older backlog again after resume, and use periodic refresh as a fallback when live message events are not emitted
 - `listen-and-send <threadId>` - run the same live listening flow as `listen`, while also accepting terminal input and sending each typed line as a fresh next turn on that thread; do not reuse an in-flight turn from the terminal path, and surface command-approval requests in the console when they occur
 - `listen-and-send` should keep a stable bottom input line in interactive terminals while new output prints above it
-- `doctor` - validate environment and connectivity
+- `doctor` - validate config file, local server command, and connectivity
 
 Optional later:
 - `connect`
@@ -325,6 +323,6 @@ Prefer an in-process fake JSON-RPC App Server for tests over real-server-only te
 
 - Keep changes restart-safe and local-only.
 - Prefer explicit domain models, explicit IDs, and auditable state transitions.
-- Do not add production-only infrastructure unless the repo explicitly graduates beyond prototype scope.
+- Do not add cloud or multi-user infrastructure unless the repo explicitly expands beyond the current local-only scope.
 - Do not implement out-of-scope integrations under feature flags "just in case".
 - When uncertain about Codex behavior, document assumptions first and code second.
