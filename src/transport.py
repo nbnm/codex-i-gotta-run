@@ -12,6 +12,8 @@ from models import JsonRpcErrorPayload
 logger = logging.getLogger(__name__)
 
 NotificationHandler = Callable[[str, dict[str, Any]], Awaitable[None] | None]
+RequestHandler = Callable[[str, dict[str, Any]], Awaitable[Any] | Any]
+UNHANDLED = object()
 
 
 class TransportError(RuntimeError):
@@ -40,14 +42,19 @@ class StdioJsonRpcTransport:
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._send_lock = asyncio.Lock()
         self._notification_handlers: list[NotificationHandler] = []
+        self._request_handlers: list[RequestHandler] = []
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
+        self._server_request_tasks: set[asyncio.Task[None]] = set()
         self._closed = False
         self._stdout_buffer = bytearray()
         self._stderr_buffer = bytearray()
 
     def add_notification_handler(self, handler: NotificationHandler) -> None:
         self._notification_handlers.append(handler)
+
+    def add_request_handler(self, handler: RequestHandler) -> None:
+        self._request_handlers.append(handler)
 
     async def connect(self) -> None:
         if self._process is not None:
@@ -78,6 +85,8 @@ class StdioJsonRpcTransport:
         for task in (self._stdout_task, self._stderr_task):
             if task is not None:
                 task.cancel()
+        for task in list(self._server_request_tasks):
+            task.cancel()
         if self._process is not None:
             if self._process.stdin is not None:
                 self._process.stdin.close()
@@ -162,12 +171,21 @@ class StdioJsonRpcTransport:
         if "id" in message and "method" not in message:
             request_id = int(message["id"])
             future = self._pending.pop(request_id, None)
-            if future is None:
+            if future is None or future.done():
                 return
             if "error" in message:
                 future.set_exception(JsonRpcError(JsonRpcErrorPayload.model_validate(message["error"])))
             else:
                 future.set_result(message.get("result"))
+            return
+
+        if "method" in message and "id" in message:
+            request_id = message["id"]
+            method = str(message["method"])
+            params = message.get("params") or {}
+            task = asyncio.create_task(self._handle_server_request(request_id, method, params, message))
+            self._server_request_tasks.add(task)
+            task.add_done_callback(self._server_request_tasks.discard)
             return
 
         if "method" in message and "id" not in message:
@@ -179,7 +197,30 @@ class StdioJsonRpcTransport:
                     await result
             return
 
-        logger.warning("Unhandled JSON-RPC message", extra={"message": message})
+        logger.warning("Unhandled JSON-RPC message", extra={"jsonrpc_message": message})
+
+    async def _handle_server_request(
+        self,
+        request_id: Any,
+        method: str,
+        params: dict[str, Any],
+        raw_message: dict[str, Any],
+    ) -> None:
+        try:
+            for handler in list(self._request_handlers):
+                result = handler(method, params)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if result is not UNHANDLED:
+                    await self._send({"id": request_id, "result": result})
+                    return
+            logger.warning("Unhandled JSON-RPC server request", extra={"jsonrpc_message": raw_message})
+            await self._send({"id": request_id, "error": {"code": -32601, "message": f"No client handler for {method}"}})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Server request handler failed", extra={"error": str(exc), "jsonrpc_message": raw_message})
+            await self._send({"id": request_id, "error": {"code": -32603, "message": str(exc)}})
 
     async def _flush_stdout_buffer_on_close(self) -> None:
         if not self._stdout_buffer:

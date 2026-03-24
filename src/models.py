@@ -93,20 +93,6 @@ class EventRecord(Model):
     received_at: str = Field(default_factory=utc_now_iso)
 
 
-class QueuedInputRecord(Model):
-    id: str
-    thread_id: str
-    mode: Literal["steer", "continue", "auto"] = "auto"
-    text: str
-    status: Literal["queued", "submitted", "done", "failed", "cancelled"] = "queued"
-    created_at: str = Field(default_factory=utc_now_iso)
-    submitted_at: str | None = None
-    completed_at: str | None = None
-    error: str | None = None
-    action_taken: str | None = None
-    turn_id: str | None = None
-
-
 class ConnectionState(Model):
     app_server_instance: str | None = None
     initialized_at: str | None = None
@@ -134,10 +120,6 @@ class ThreadEnvelope(Model):
 
 class TurnEnvelope(Model):
     turn: AppServerTurn
-
-
-class SteerResult(Model):
-    turn_id: str = Field(alias="turnId")
 
 
 class UnsubscribeResult(Model):

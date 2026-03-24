@@ -13,3 +13,7 @@ level = "INFO"
 name = "codex-i-gotta-run"
 title = "codex-i-gotta-run"
 version = "0.1.0"
+
+[turn_start_options]
+sandbox_mode = "danger-full-access"
+approval_policy = "never"

@@ -25,7 +25,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 
 ### Internal architecture
 
-- Separate modules for `transport`, `adapter`, `registry`, `ingestion`, `steering`, and `cli`.
+- Separate modules for `transport`, `adapter`, `registry`, `ingestion`, and `cli`.
 - Keep raw protocol payloads at the transport boundary.
 - Normalize responses into typed domain models in the adapter.
 - Use explicit thread IDs and turn IDs throughout.
@@ -37,7 +37,6 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 - Use JSON files for:
   - thread snapshots
   - turn snapshots
-  - queued inputs
   - connection-state snapshot
   - append-only event log
 - Preserve raw events before applying projections.
@@ -46,7 +45,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 ### Operator UX
 
 - Typer provides the CLI command structure.
-- Rich is used for `threads`, `inspect`, `status`, `doctor`, `tail`, and `listen` output.
+- Rich is used for `threads`, `inspect`, `read`, `doctor`, and `listen` output.
 - Human-readable local output is the default in v0.
 - `listen` should prioritize recent actual thread message history before printing newly detected messages, suppress older backlog replay after the initial history window has been shown, and use periodic snapshot refresh as a fallback when live message events are too sparse.
 - stderr noise from the App Server should stay out of normal operator output unless debug logging is enabled.
@@ -64,26 +63,17 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 ### Testing
 
 - Use `pytest` and temp directories for registry recovery tests.
-- Use an in-process fake stdio JSON-RPC server to simulate initialize, list, read, resume, start, steer, interrupt, and notification flows.
+- Use an in-process fake stdio JSON-RPC server to simulate initialize, list, read, resume, turn start, command approval requests, and notification flows.
 - Keep real-server integration tests optional and separate from the default test suite.
 
 ## Public Interfaces And Internal Contracts
 
 - CLI surface should match the planned commands:
-  - `connect`
   - `threads`
   - `inspect`
   - `read`
-  - `resume`
-  - `start`
-  - `continue`
-  - `steer`
-  - `interrupt`
-  - `tail`
   - `listen`
-  - `queue`
-  - `autosteer`
-  - `status`
+  - `listen-and-send`
   - `doctor`
 - Internal adapter contract should expose stable Python methods matching the product brief:
   - `initialize_client()`
@@ -92,13 +82,10 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
   - `resume_thread(...)`
   - `start_thread(...)`
   - `start_turn(...)`
-  - `steer_turn(...)`
-  - `interrupt_turn(...)`
 - Core model types should be explicit Pydantic models for:
   - `ThreadRecord`
   - `TurnRecord`
   - `EventRecord`
-  - `QueuedInput`
   - `ConnectionState`
   - request and response envelopes
   - known notification payloads
@@ -120,14 +107,14 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
   - duplicate notification replay is idempotent
   - restart recovery rebuilds live state from snapshots and event log
   - unknown events are retained and surfaced
-- Steering tests:
-  - active known turn routes to `steer`
-  - no active turn routes to a new turn via `continue`
-  - stale state triggers refresh before mutating action
-  - interrupt only targets known active turn IDs
+- Turn-start tests:
+  - a new typed line in `listen-and-send` always starts a fresh turn on the selected thread
+  - configured `turn_start_options` are forwarded into those new turns
+  - command approval requests can be accepted from the terminal and allow the turn to continue
 - CLI tests:
   - command parsing
-  - human-readable status, threads, tail, and listen output
+  - human-readable threads, inspect, read, doctor, listen, and listen-and-send output
+  - approval prompts are shown in the console with accepted reply labels
   - operator error messages for missing config, missing thread, or uncertain state
 
 ## Assumptions And Defaults

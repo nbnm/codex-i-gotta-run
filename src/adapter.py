@@ -7,7 +7,6 @@ from config import AppConfig
 from models import (
     InitializeResponse,
     ListThreadsResponse,
-    SteerResult,
     ThreadEnvelope,
     TurnEnvelope,
     UnsubscribeResult,
@@ -75,17 +74,6 @@ class AppServerAdapter:
             payload.update(options)
         result = await self._transport.request("turn/start", payload)
         return TurnEnvelope.model_validate(result)
-
-    async def steer_turn(self, thread_id: str, turn_id: str, input_text: str) -> SteerResult:
-        result = await self._transport.request(
-            "turn/steer",
-            {
-                "threadId": thread_id,
-                "expectedTurnId": turn_id,
-                "input": [{"type": "text", "text": input_text}],
-            },
-        )
-        return SteerResult.model_validate(result)
 
     async def interrupt_turn(self, thread_id: str, turn_id: str) -> None:
         await self._transport.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})

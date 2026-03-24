@@ -27,9 +27,9 @@ Use these terms consistently.
 - **active turn** = a turn currently in progress for a thread
 - **steering** = adding more user input to an active in-flight turn
 - **continue** = starting the next turn on an existing thread after the prior turn is terminal
-- **registry** = local persisted state for known threads, turns, statuses, queued inputs, and recent events
+- **registry** = local persisted state for known threads, turns, statuses, and recent events
 - **sidecar** = the local process in this repo that connects to Codex App Server and exposes CLI-driven orchestration behavior
-- **auto steering** = policy-based decision logic that either steers an active turn or starts a follow-up turn when appropriate
+- **auto steering** = deferred future logic for policy-based routing of follow-up inputs, not part of the current CLI
 
 ## Primary architecture
 
@@ -77,10 +77,7 @@ The prototype is successful if it can:
 5. resume a known thread
 6. start a turn on a known thread
 7. receive and persist live events
-8. detect whether a thread has an active turn
-9. steer that active turn with additional input
-10. interrupt a turn
-11. recover local state after restart
+8. recover local state after restart
 
 ## Out of scope for v0
 
@@ -108,7 +105,7 @@ Document future ideas, but do not implement them.
 - Prefer event-driven updates over polling.
 - Use thread IDs and turn IDs as canonical identifiers.
 - Maintain one active-turn record per thread.
-- Make steering behavior explainable and auditable.
+- Make terminal send and approval behavior explainable and auditable.
 - Keep all commands restart-safe and idempotent where possible.
 
 ## Repository conventions
@@ -120,7 +117,7 @@ Document future ideas, but do not implement them.
 - Validation and typed boundaries: Pydantic v2.
 - Tests: `pytest`.
 - Logging: structured stdlib `logging`.
-- Runtime model: one local async `asyncio` process for transport, ingestion, queueing, and command execution.
+- Runtime model: one local async `asyncio` process for transport, ingestion, and command execution.
 - Configuration precedence: CLI flags, then env vars, then local TOML config, then code defaults.
 - Favor explicit typed domain models and conservative protocol adapters over dynamic or implicit behavior.
 
@@ -158,7 +155,6 @@ Responsibilities:
 - persist active turn per thread
 - persist latest status and summary
 - persist enough event history for debugging and replay
-- persist queued follow-up inputs
 - support crash-safe restarts
 
 Default v0 storage:
@@ -166,7 +162,6 @@ Default v0 storage:
 - append-only raw event log
 - projected thread snapshots
 - projected turn snapshots
-- queued input records
 - connection-state snapshot
 
 Logical collections to preserve even in file-backed storage:
@@ -199,16 +194,6 @@ Logical collections to preserve even in file-backed storage:
 - `payload_json`
 - `received_at`
 
-#### queued_inputs
-- `thread_id`
-- `mode` enum(`steer`, `continue`, `auto`)
-- `text`
-- `status` enum(`queued`, `submitted`, `done`, `failed`, `cancelled`)
-- `created_at`
-- `submitted_at` nullable
-- `completed_at` nullable
-- `error` nullable
-
 #### connection_state
 - `app_server_instance` nullable
 - `initialized_at` nullable
@@ -231,8 +216,6 @@ Required operations:
 - `resume_thread(thread_id, options=None)`
 - `start_thread(options=None)`
 - `start_turn(thread_id, input_text, options=None)`
-- `steer_turn(thread_id, turn_id, input_text)`
-- `interrupt_turn(thread_id, turn_id)`
 - `unsubscribe_thread(thread_id)` if needed later
 
 The adapter should also surface typed notifications for:
@@ -266,85 +249,61 @@ Rules:
 ### 5. Steering engine
 
 Responsibilities:
-- decide whether new input should become:
-  - `turn/steer` on the active turn
-  - or `turn/start` as the next turn
-- enforce one active turn per thread
-- support manual and queued input modes
-- provide deterministic behavior
+- route terminal-originated follow-up input into explicit `turn/start` calls
+- keep terminal-driven behavior deterministic and restart-safe
+- avoid guessing or mutating an in-flight turn from the terminal path
 
 v0 decision rule:
-- if a thread has an active in-progress turn with known `turnId`, steering uses `turn/steer`
-- if a thread has no active turn, continuation uses `turn/start`
-- if local state is stale or uncertain, refresh via `read_thread()` or `resume_thread()` before acting
-- never guess the active turn ID
+- terminal input always starts a fresh next turn via `turn/start`
+- forward explicit turn-start options from config when present
+- use `read_thread()` and periodic refreshes for message visibility rather than active-turn mutation
 
 ### 6. CLI
 
-Provide a minimal local CLI.
+Provide a minimal local CLI focused on thread discovery, inspection, and live listening.
 
 Required commands:
-- `connect` - connect to App Server and initialize
 - `threads` - list known threads
 - `threads` output should include each thread's core folder (`cwd`) and latest known turn timestamp when available
 - `inspect <threadId>` - show known metadata and latest turn state
 - `read <threadId>` - fetch stored thread data from App Server
-- `resume <threadId>` - resume a thread into the active session
-- `start "<prompt>"` - create a new thread and start its first turn
-- `continue <threadId> "<prompt>"` - start a new turn on an existing thread
-- `steer <threadId> <turnId> "<prompt>"` - steer an active turn
-- `interrupt <threadId> <turnId>` - interrupt an active turn
-- `tail <threadId>` - stream formatted live events for a thread
 - `listen <threadId>` - print recent thread messages first, then newly detected messages to the local console; support skipping history and limiting replay depth when requested, without replaying the older backlog again after resume, and use periodic refresh as a fallback when live message events are not emitted
-- `queue <threadId> "<prompt>"` - enqueue follow-up input
-- `autosteer <threadId>` - process queued inputs for a thread using v0 rules
-- `status` - show connection state, active turns, and queue state
+- `listen-and-send <threadId>` - run the same live listening flow as `listen`, while also accepting terminal input and sending each typed line as a fresh next turn on that thread; do not reuse an in-flight turn from the terminal path, and surface command-approval requests in the console when they occur
 - `doctor` - validate environment and connectivity
 
 Optional later:
+- `connect`
+- `tail <threadId>`
+- `resume <threadId>`
+- `start "<prompt>"`
+- `status`
 - `archive <threadId>`
 - `fork <threadId>`
 - `replay-events <threadId>`
 - `gc-events`
 - `sync`
 
-## Steering semantics
+## Terminal Send Semantics
 
-In this repository, "steering" has a precise meaning.
+In the current CLI, terminal follow-up input has a precise meaning.
 
-### Steering
+### Terminal Send
 
-Use steering only when:
-- there is an active in-flight turn
-- the active `turnId` is known
-- the goal is to append more user input to the current turn
+Use terminal send when:
+- the operator types a new line into `listen-and-send`
+- the goal is to start the next explicit turn on the same thread
+- the operator wants configured `turn_start_options` to apply
 
-### Continuation
-
-Use continuation when:
-- the previous turn is terminal
-- the user wants the next instruction executed in the same thread
-
-### Interruption
-
-Use interruption when:
-- the current active turn should stop
-- the agent is headed in the wrong direction
-- the user wants to replace the current approach
-
-Do not conflate these operations.
-
-## Auto steering in v0
-
-For this project, auto steering means controlled automatic routing of queued inputs using current thread state.
+Approval handling:
+- if the App Server requests approval for a command execution, the CLI must print the approval reason and command
+- the operator must be able to reply with an explicit decision such as `approve` or `cancel`
+- the turn should remain paused until the approval response is sent
 
 Rules:
-- queued inputs must be persisted before submission
-- the engine must check current thread state before acting
-- if there is a known active turn, queued input may become `steer`
-- if there is no active turn, queued input may become a new turn
-- if state is stale or uncertain, refresh first
-- if thread state remains uncertain after refresh, fail safely and leave an auditable error
+- typed terminal input should always create the next explicit turn on the same thread
+- configured turn-start options should be forwarded when starting that turn
+- if the App Server pauses for command approval, the CLI must surface the prompt and wait for a reply
+- if state is stale or uncertain for message display, refresh via `read_thread()` rather than guessing
 
 ## Testing requirements
 
@@ -355,8 +314,8 @@ At minimum, cover:
 - adapter normalization of thread and turn data
 - registry recovery after restart
 - duplicate event replay idempotency
-- steering versus continuation routing
-- interruption behavior
+- turn-start routing for terminal input
+- approval handling for command execution requests
 - CLI command behavior for local operator workflows
 
 Prefer an in-process fake JSON-RPC App Server for tests over real-server-only testing.

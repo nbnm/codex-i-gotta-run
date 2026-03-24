@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from adapter import AppServerAdapter
 from config import AppConfig
 from ingestion import EventIngestor
-from models import ConnectionState, EventRecord, QueuedInputRecord, ThreadRecord, TurnRecord, utc_now_iso
+from models import ConnectionState, EventRecord, ThreadRecord, TurnRecord, utc_now_iso
 from registry import JsonRegistry
-from steering import SteeringDecision, SteeringEngine
 from transport import StdioJsonRpcTransport
 
 
@@ -32,7 +29,6 @@ class OrchestratorService:
         self.adapter = AppServerAdapter(self.transport, config)
         self.ingestor = EventIngestor(self.registry)
         self.adapter.add_notification_handler(self._handle_notification)
-        self.steering = SteeringEngine(self.adapter, self.registry, self.ingestor)
         self._connected = False
 
     async def connect(self) -> ConnectionState:
@@ -73,45 +69,24 @@ class OrchestratorService:
     async def start_new_thread(self, prompt: str) -> StartResult:
         thread_envelope = await self.adapter.start_thread({})
         thread = self.ingestor.project_thread_snapshot(thread_envelope.thread.model_dump(by_alias=True))
-        turn_envelope = await self.adapter.start_turn(thread.thread_id, prompt)
+        turn_options = self.config.turn_start_options or None
+        turn_envelope = await self.adapter.start_turn(thread.thread_id, prompt, options=turn_options)
         turn = self.ingestor.project_turn_snapshot(turn_envelope.turn.model_dump(by_alias=True), thread_id=thread.thread_id)
         thread = self.registry.get_thread(thread.thread_id) or thread
         return StartResult(thread=thread, turn=turn)
 
-    async def continue_thread(self, thread_id: str, prompt: str) -> SteeringDecision:
-        return await self.steering.apply(thread_id, prompt, mode="continue")
+    async def start_turn_on_thread(self, thread_id: str, prompt: str) -> TurnRecord:
+        response = await self.adapter.resume_thread(thread_id)
+        self.ingestor.project_thread_snapshot(response.thread.model_dump(by_alias=True))
+        turn_options = self.config.turn_start_options or None
+        turn_envelope = await self.adapter.start_turn(thread_id, prompt, options=turn_options)
+        turn = self.ingestor.project_turn_snapshot(turn_envelope.turn.model_dump(by_alias=True), thread_id=thread_id)
+        return turn
 
-    async def steer_thread(self, thread_id: str, turn_id: str, prompt: str) -> str:
-        result = await self.adapter.steer_turn(thread_id, turn_id, prompt)
-        return result.turn_id
-
-    async def interrupt_turn(self, thread_id: str, turn_id: str) -> None:
-        await self.adapter.interrupt_turn(thread_id, turn_id)
-
-    def queue_input(self, thread_id: str, text: str, mode: str = "auto") -> QueuedInputRecord:
-        item = QueuedInputRecord(id=f"queue_{uuid.uuid4().hex}", thread_id=thread_id, text=text, mode=mode)
-        self.registry.save_queued_input(item)
-        return item
-
-    async def process_queue(self, thread_id: str) -> list[QueuedInputRecord]:
-        return await self.steering.process_queue(thread_id)
-
-    def inspect_local(self, thread_id: str) -> tuple[ThreadRecord | None, list[TurnRecord], list[QueuedInputRecord]]:
+    def inspect_local(self, thread_id: str) -> tuple[ThreadRecord | None, list[TurnRecord]]:
         thread = self.registry.get_thread(thread_id)
         turns = self.registry.list_turns(thread_id=thread_id)
-        queue_items = self.registry.list_queued_inputs(thread_id=thread_id)
-        return thread, turns, queue_items
-
-    def status_snapshot(self) -> dict[str, Any]:
-        threads = self.registry.list_threads()
-        active = [thread for thread in threads if thread.active_turn_id]
-        queued = self.registry.list_queued_inputs(statuses=["queued", "submitted"])
-        return {
-            "connection": self.registry.get_connection_state(),
-            "active_threads": active,
-            "queued_inputs": queued,
-            "known_threads": threads,
-        }
+        return thread, turns
 
     async def doctor(self) -> dict[str, Any]:
         checks: dict[str, Any] = {
@@ -125,30 +100,6 @@ class OrchestratorService:
             except Exception as exc:  # noqa: BLE001
                 checks["connect"] = {"ok": False, "error": str(exc)}
         return checks
-
-    async def tail_events(self, thread_id: str, *, max_events: int | None = None) -> list[EventRecord]:
-        history = self.registry.list_events(thread_id=thread_id, limit=self.config.recent_event_limit)
-        events: list[EventRecord] = list(history)
-        queue: asyncio.Queue[EventRecord] = asyncio.Queue()
-
-        def on_event(event: EventRecord) -> None:
-            if event.thread_id == thread_id:
-                queue.put_nowait(event)
-
-        unsubscribe = self.ingestor.subscribe(on_event)
-        try:
-            await self.resume_thread(thread_id)
-            while max_events is None or len(events) < max_events:
-                event = await queue.get()
-                events.append(event)
-                if max_events is not None and len(events) >= max_events:
-                    break
-        finally:
-            unsubscribe()
-        return events
-
-    def recent_events(self, thread_id: str, *, limit: int | None = None) -> list[EventRecord]:
-        return self.registry.list_events(thread_id=thread_id, limit=limit or self.config.recent_event_limit)
 
     async def listen(
         self,

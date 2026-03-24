@@ -31,6 +31,7 @@ class AppConfig(Model):
     client_info: ClientInfo = Field(default_factory=ClientInfo)
     experimental_api: bool = False
     opt_out_notification_methods: list[str] = Field(default_factory=list)
+    turn_start_options: dict[str, Any] = Field(default_factory=dict)
     log_level: str = "INFO"
     recent_event_limit: int = 20
 
@@ -61,12 +62,14 @@ def _parse_config_file(path: Path | None) -> dict[str, Any]:
     client = raw.get("client", {})
     registry = raw.get("registry", {})
     logging = raw.get("logging", {})
+    turn_start_options = raw.get("turn_start_options", {})
 
     return {
         "app_server_command": list(server.get("command", [])),
         "app_server_cwd": server.get("cwd"),
         "experimental_api": bool(server.get("experimental_api", False)),
         "opt_out_notification_methods": list(server.get("opt_out_notification_methods", [])),
+        "turn_start_options": dict(turn_start_options) if isinstance(turn_start_options, dict) else {},
         "data_dir": registry.get("data_dir"),
         "log_level": logging.get("level", "INFO"),
         "client_info": {

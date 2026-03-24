@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from typing import Iterable, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
-from models import ConnectionState, EventRecord, QueuedInputRecord, ThreadRecord, TurnRecord
+from models import ConnectionState, EventRecord, ThreadRecord, TurnRecord
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -17,7 +17,6 @@ class JsonRegistry:
         self.data_dir = data_dir
         self.threads_dir = self.data_dir / "threads"
         self.turns_dir = self.data_dir / "turns"
-        self.queue_dir = self.data_dir / "queued_inputs"
         self.events_path = self.data_dir / "events.jsonl"
         self.connection_state_path = self.data_dir / "connection_state.json"
         self._ensure_dirs()
@@ -26,7 +25,6 @@ class JsonRegistry:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.threads_dir.mkdir(parents=True, exist_ok=True)
         self.turns_dir.mkdir(parents=True, exist_ok=True)
-        self.queue_dir.mkdir(parents=True, exist_ok=True)
         self.events_path.touch(exist_ok=True)
 
     def save_thread(self, thread: ThreadRecord) -> None:
@@ -70,26 +68,6 @@ class JsonRegistry:
         if limit is not None:
             items = items[-limit:]
         return items
-
-    def save_queued_input(self, item: QueuedInputRecord) -> None:
-        self._atomic_write(self.queue_dir / f"{item.id}.json", item.model_dump(mode="json"))
-
-    def get_queued_input(self, item_id: str) -> QueuedInputRecord | None:
-        return self._load_model(self.queue_dir / f"{item_id}.json", QueuedInputRecord)
-
-    def list_queued_inputs(
-        self,
-        *,
-        thread_id: str | None = None,
-        statuses: Iterable[str] | None = None,
-    ) -> list[QueuedInputRecord]:
-        items = self._load_collection(self.queue_dir, QueuedInputRecord)
-        if thread_id is not None:
-            items = [item for item in items if item.thread_id == thread_id]
-        if statuses is not None:
-            allowed = set(statuses)
-            items = [item for item in items if item.status in allowed]
-        return sorted(items, key=lambda item: item.created_at)
 
     def save_connection_state(self, state: ConnectionState) -> None:
         self._atomic_write(self.connection_state_path, state.model_dump(mode="json"))

@@ -22,8 +22,11 @@ def load_state() -> dict[str, Any]:
             "turns": {},
             "loaded": [],
             "counter": 1,
+            "pending_approvals": {},
         }
-    return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    state.setdefault("pending_approvals", {})
+    return state
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -52,6 +55,45 @@ def emit(message: dict[str, Any]) -> None:
 
 def error_response(request_id: int, code: int, message: str) -> dict[str, Any]:
     return {"id": request_id, "error": {"code": code, "message": message}}
+
+
+def handle_response(state: dict[str, Any], message: dict[str, Any]) -> None:
+    request_id = str(message.get("id"))
+    pending = state["pending_approvals"].pop(request_id, None)
+    if pending is None:
+        return
+    result = message.get("result") or {}
+    decision = result.get("decision")
+    thread = state["threads"][pending["thread_id"]]
+    turn = state["turns"][pending["turn_id"]]
+    if decision in {"accept", "acceptForSession"} or isinstance(decision, dict):
+        turn["items"].append(
+            {
+                "id": next_id(state, "item"),
+                "type": "agentMessage",
+                "phase": "commentary",
+                "text": pending["approved_text"],
+            }
+        )
+        turn["status"] = "completed"
+        turn["summary"] = pending["approved_text"]
+    else:
+        turn["items"].append(
+            {
+                "id": next_id(state, "item"),
+                "type": "agentMessage",
+                "phase": "commentary",
+                "text": pending["declined_text"],
+            }
+        )
+        turn["status"] = "failed"
+        turn["summary"] = pending["declined_text"]
+        turn["error"] = {"message": "approval declined"}
+    thread["status"] = {"type": "idle"}
+    thread["activeTurnId"] = None
+    save_state(state)
+    emit({"method": "turn/completed", "params": {"threadId": thread["id"], "turn": turn}})
+    emit({"method": "thread/status/changed", "params": {"threadId": thread["id"], "status": thread["status"]}})
 
 
 def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: bool) -> tuple[dict[str, Any] | None, bool]:
@@ -148,6 +190,9 @@ def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: 
             "error": None,
             "summary": None,
         }
+        for key, value in params.items():
+            if key not in {"threadId", "input"}:
+                turn[key] = value
         state["turns"][turn_id] = turn
         thread.setdefault("turns", []).append(turn_id)
         thread["status"] = {"type": "active", "activeFlags": []}
@@ -162,6 +207,32 @@ def handle_request(state: dict[str, Any], message: dict[str, Any], initialized: 
                 "params": {"threadId": thread["id"], "turnId": turn_id, "delta": f"working on: {text}"},
             }
         )
+        if "commit" in text.lower():
+            approval_request_id = state["counter"]
+            state["counter"] += 1
+            state["pending_approvals"][str(approval_request_id)] = {
+                "thread_id": thread["id"],
+                "turn_id": turn_id,
+                "approved_text": f"approved: {text}",
+                "declined_text": f"declined: {text}",
+            }
+            save_state(state)
+            emit(
+                {
+                    "id": approval_request_id,
+                    "method": "item/commandExecution/requestApproval",
+                    "params": {
+                        "threadId": thread["id"],
+                        "turnId": turn_id,
+                        "itemId": next_id(state, "call"),
+                        "reason": "Approve command execution?",
+                        "command": f"/bin/zsh -lc '{text}'",
+                        "availableDecisions": ["accept", "cancel"],
+                    },
+                }
+            )
+            save_state(state)
+            return {"id": request_id, "result": {"turn": turn}}, initialized
         if not hold:
             turn["items"].append(
                 {
@@ -245,7 +316,9 @@ def main() -> None:
         if not raw:
             continue
         message = json.loads(raw)
-        if "id" in message:
+        if "id" in message and "method" not in message:
+            handle_response(state, message)
+        elif "id" in message:
             response, initialized = handle_request(state, message, initialized)
             if response is not None:
                 emit(response)
