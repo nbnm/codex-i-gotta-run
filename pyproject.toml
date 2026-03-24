@@ -1,0 +1,29 @@
+[project]
+name = "codex-thread-orchestrator"
+version = "0.1.0"
+description = "Local-only prototype sidecar for orchestrating Codex threads via the App Server."
+readme = "AGENTS.md"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.11.0,<3",
+  "rich>=14.0.0",
+  "typer>=0.16.0,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.5,<9",
+  "pytest-asyncio>=1.0.0,<2",
+]
+
+[project.scripts]
+codex-thread-orchestrator = "codex_thread_orchestrator.cli:app"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
