@@ -17,19 +17,25 @@ from models import EventRecord, ThreadRecord, TurnRecord
 from service import OrchestratorService
 from transport import UNHANDLED
 
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.patch_stdout import patch_stdout
+except ImportError:  # pragma: no cover - dependency is expected in normal runtime
+    PromptSession = None
+    patch_stdout = None
+
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
+PROMPT_TEXT = "> "
 
-ConfigOption = Annotated[Path | None, typer.Option("--config", help="Path to a TOML config file.")]
-DataDirOption = Annotated[Path | None, typer.Option("--data-dir", help="Override the local registry directory.")]
-ServerCmdOption = Annotated[
-    str | None,
-    typer.Option("--server-cmd", help="Override the App Server spawn command as a single shell-style string."),
+ConfigOption = Annotated[
+    Path | None,
+    typer.Option("--config", help="Path to a TOML config file. Defaults to ./config.toml when present."),
 ]
 
 
-def _build_service(config_path: Path | None, data_dir: Path | None, server_cmd: str | None) -> OrchestratorService:
-    config = load_config(config_path, data_dir=data_dir, server_cmd=server_cmd)
+def _build_service(config_path: Path | None) -> OrchestratorService:
+    config = load_config(config_path)
     configure_logging(config.log_level)
     return OrchestratorService(config)
 
@@ -40,11 +46,9 @@ def _run(coro: Any) -> Any:
 
 async def _execute_with_service(
     config_path: Path | None,
-    data_dir: Path | None,
-    server_cmd: str | None,
     operation: Callable[[OrchestratorService], Awaitable[Any]],
 ) -> Any:
-    service = _build_service(config_path, data_dir, server_cmd)
+    service = _build_service(config_path)
     try:
         return await operation(service)
     finally:
@@ -184,19 +188,19 @@ def _parse_approval_input(text: str, params: dict[str, Any]) -> Any | None:
 
 
 @app.command(help="List known threads from the App Server and refresh the local registry cache.")
-def threads(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
+def threads(config: ConfigOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
         rows = await service.list_threads()
         turns_by_thread = {row.thread_id: service.registry.list_turns(thread_id=row.thread_id) for row in rows}
         _render_threads(rows, turns_by_thread)
 
-    _run(_execute_with_service(config, data_dir, server_cmd, operation))
+    _run(_execute_with_service(config, operation))
 
 
 @app.command(help="Show locally cached metadata and recent turns for a thread.")
-def inspect(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
-    service = _build_service(config, data_dir, server_cmd)
+def inspect(thread_id: str, config: ConfigOption = None) -> None:
+    service = _build_service(config)
     thread, turns = service.inspect_local(thread_id)
     if thread is None:
         raise typer.Exit(code=1)
@@ -208,14 +212,14 @@ def inspect(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption
 
 
 @app.command(help="Read a thread from the App Server and refresh its stored local snapshot.")
-def read(thread_id: str, config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
+def read(thread_id: str, config: ConfigOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
         thread = await service.read_thread(thread_id, include_turns=True)
         _render_threads([thread])
         _render_turns(service.registry.list_turns(thread_id=thread_id))
 
-    _run(_execute_with_service(config, data_dir, server_cmd, operation))
+    _run(_execute_with_service(config, operation))
 
 
 @app.command(help="Replay recent thread messages, then resume the thread and print newly detected live messages.")
@@ -229,8 +233,6 @@ def listen(
         typer.Option("--refresh-seconds", help="Fallback snapshot refresh interval while listening."),
     ] = 2.0,
     config: ConfigOption = None,
-    data_dir: DataDirOption = None,
-    server_cmd: ServerCmdOption = None,
 ) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
@@ -311,7 +313,7 @@ def listen(
             with contextlib.suppress(asyncio.CancelledError):
                 await refresh_task
 
-    _run(_execute_with_service(config, data_dir, server_cmd, operation))
+    _run(_execute_with_service(config, operation))
 
 
 @app.command(name="listen-and-send", help="Listen to a thread and start a new turn for each line typed into the terminal.")
@@ -325,8 +327,6 @@ def listen_and_send(
         typer.Option("--refresh-seconds", help="Fallback snapshot refresh interval while listening."),
     ] = 2.0,
     config: ConfigOption = None,
-    data_dir: DataDirOption = None,
-    server_cmd: ServerCmdOption = None,
 ) -> None:
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
@@ -335,6 +335,11 @@ def listen_and_send(
         seen_message_ids: set[str] = set()
         approval_queue: asyncio.Queue[tuple[dict[str, Any], asyncio.Future[dict[str, Any]]]] = asyncio.Queue()
         active_approval: tuple[dict[str, Any], asyncio.Future[dict[str, Any]]] | None = None
+        interactive_prompt = (
+            PromptSession(PROMPT_TEXT)
+            if PromptSession is not None and patch_stdout is not None and sys.stdin.isatty() and sys.stdout.isatty()
+            else None
+        )
 
         async def collect_messages() -> list[tuple[str, str]]:
             thread = await service.read_thread(thread_id, include_turns=True)
@@ -430,9 +435,15 @@ def listen_and_send(
 
         async def input_loop() -> None:
             while True:
-                line = await asyncio.to_thread(sys.stdin.readline)
-                if line == "":
-                    return
+                if interactive_prompt is not None:
+                    try:
+                        line = await interactive_prompt.prompt_async()
+                    except EOFError:
+                        return
+                else:
+                    line = await asyncio.to_thread(sys.stdin.readline)
+                    if line == "":
+                        return
                 prompt = line.strip()
                 if not prompt:
                     continue
@@ -462,51 +473,53 @@ def listen_and_send(
 
         refresh_task = asyncio.create_task(refresh_loop())
         approval_task = asyncio.create_task(approval_loop())
-        listener_task = asyncio.create_task(
-            service.listen(
-                thread_id,
-                on_event,
-                max_events=max_events,
+        prompt_context = patch_stdout() if interactive_prompt is not None and patch_stdout is not None else contextlib.nullcontext()
+        with prompt_context:
+            listener_task = asyncio.create_task(
+                service.listen(
+                    thread_id,
+                    on_event,
+                    max_events=max_events,
+                )
             )
-        )
-        input_task = asyncio.create_task(input_loop())
-        try:
-            done, pending = await asyncio.wait(
-                {listener_task, input_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if input_task in done and listener_task in pending:
-                with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(asyncio.shield(listener_task), timeout=0.5)
-                if not listener_task.done():
-                    listener_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await listener_task
-            elif listener_task in done and input_task in pending:
-                if input_busy.is_set():
+            input_task = asyncio.create_task(input_loop())
+            try:
+                done, pending = await asyncio.wait(
+                    {listener_task, input_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if input_task in done and listener_task in pending:
                     with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
-                        await asyncio.wait_for(asyncio.shield(input_task), timeout=1)
-                if not input_task.done():
-                    input_task.cancel()
+                        await asyncio.wait_for(asyncio.shield(listener_task), timeout=0.5)
+                    if not listener_task.done():
+                        listener_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await listener_task
+                elif listener_task in done and input_task in pending:
+                    if input_busy.is_set():
+                        with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
+                            await asyncio.wait_for(asyncio.shield(input_task), timeout=1)
+                    if not input_task.done():
+                        input_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await input_task
+                for task in done:
                     with contextlib.suppress(asyncio.CancelledError):
-                        await input_task
-            for task in done:
+                        await task
+            finally:
+                stop_refresh.set()
+                refresh_task.cancel()
+                approval_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await task
-        finally:
-            stop_refresh.set()
-            refresh_task.cancel()
-            approval_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await refresh_task
-            with contextlib.suppress(asyncio.CancelledError):
-                await approval_task
+                    await refresh_task
+                with contextlib.suppress(asyncio.CancelledError):
+                    await approval_task
 
-    _run(_execute_with_service(config, data_dir, server_cmd, operation))
+    _run(_execute_with_service(config, operation))
 
 
 @app.command(help="Validate local configuration and test connectivity to the Codex App Server.")
-def doctor(config: ConfigOption = None, data_dir: DataDirOption = None, server_cmd: ServerCmdOption = None) -> None:
+def doctor(config: ConfigOption = None) -> None:
     async def operation(service: OrchestratorService) -> None:
         report = await service.doctor()
         table = Table(title="Doctor")
@@ -518,4 +531,4 @@ def doctor(config: ConfigOption = None, data_dir: DataDirOption = None, server_c
             table.add_row(name, "yes" if result.get("ok") else "no", details)
         console.print(table)
 
-    _run(_execute_with_service(config, data_dir, server_cmd, operation))
+    _run(_execute_with_service(config, operation))

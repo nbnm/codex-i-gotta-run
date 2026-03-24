@@ -12,14 +12,54 @@ from service import OrchestratorService
 from transport import StdioJsonRpcTransport, UNHANDLED
 
 
+def _write_config(tmp_path: Path, server_command: list[str], *, data_dir: str = "registry") -> Path:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[server]",
+                f'command = ["{server_command[0]}", "{server_command[1]}", "{server_command[2]}"]',
+                "",
+                "[registry]",
+                f'data_dir = "{(tmp_path / data_dir).as_posix()}"',
+                "",
+                "[logging]",
+                'level = "INFO"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _write_turn_options_config(tmp_path: Path, server_command: list[str]) -> Path:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[server]",
+                f'command = ["{server_command[0]}", "{server_command[1]}", "{server_command[2]}"]',
+                "",
+                "[registry]",
+                f'data_dir = "{(tmp_path / "registry").as_posix()}"',
+                "",
+                "[turn_start_options]",
+                'sandbox_mode = "danger-full-access"',
+                'approval_policy = "never"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
 @pytest.mark.asyncio
 async def test_service_start_and_read_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state_path = tmp_path / "fake-server-state.json"
     monkeypatch.setenv("FAKE_APP_SERVER_STATE_PATH", str(state_path))
-    config = load_config(
-        data_dir=tmp_path / "registry",
-        server_cmd=[sys.executable, "-m", "tests.fake_app_server"],
-    )
+    config = load_config(_write_config(tmp_path, [sys.executable, "-m", "tests.fake_app_server"]))
     service = OrchestratorService(config)
     try:
         await service.connect()
@@ -38,10 +78,7 @@ async def test_service_start_and_read_thread(tmp_path: Path, monkeypatch: pytest
 async def test_service_lists_threads_after_seeded_turn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state_path = tmp_path / "fake-server-state.json"
     monkeypatch.setenv("FAKE_APP_SERVER_STATE_PATH", str(state_path))
-    config = load_config(
-        data_dir=tmp_path / "registry",
-        server_cmd=[sys.executable, "-m", "tests.fake_app_server"],
-    )
+    config = load_config(_write_config(tmp_path, [sys.executable, "-m", "tests.fake_app_server"]))
     service = OrchestratorService(config)
     try:
         await service.connect()
@@ -55,10 +92,7 @@ async def test_service_lists_threads_after_seeded_turn(tmp_path: Path, monkeypat
 
 @pytest.mark.asyncio
 async def test_resume_thread_handles_large_jsonl_messages(tmp_path: Path) -> None:
-    config = load_config(
-        data_dir=tmp_path / "registry",
-        server_cmd=[sys.executable, "-m", "tests.huge_line_server"],
-    )
+    config = load_config(_write_config(tmp_path, [sys.executable, "-m", "tests.huge_line_server"]))
     service = OrchestratorService(config)
     try:
         await service.connect()
@@ -77,26 +111,8 @@ async def test_start_turn_on_existing_thread_uses_configured_turn_start_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state_path = tmp_path / "fake-server-state.json"
-    config_path = tmp_path / "config.toml"
     monkeypatch.setenv("FAKE_APP_SERVER_STATE_PATH", str(state_path))
-    config_path.write_text(
-        """
-[server]
-command = ["python3", "-m", "tests.fake_app_server"]
-
-[registry]
-data_dir = "registry"
-
-[turn_start_options]
-sandbox_mode = "danger-full-access"
-approval_policy = "never"
-""".strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    config = load_config(config_path)
-    config.app_server_command = [sys.executable, "-m", "tests.fake_app_server"]
-    config.data_dir = (tmp_path / "registry").resolve()
+    config = load_config(_write_turn_options_config(tmp_path, [sys.executable, "-m", "tests.fake_app_server"]))
     service = OrchestratorService(config)
     try:
         await service.connect()

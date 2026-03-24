@@ -11,7 +11,7 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 - Validation and models: Pydantic v2
 - Persistence: JSON files with projected snapshots and an append-only event log
 - Logging: structured stdlib `logging`
-- Config: CLI flags, env vars, and optional local TOML config
+- Config: local TOML config with `--config` selection and code defaults
 - Tests: `pytest` with an in-process fake JSON-RPC App Server over `stdio`
 
 ## Key Stack Decisions
@@ -48,12 +48,13 @@ Use a local-first Python stack optimized for deterministic behavior, explicit st
 - Rich is used for `threads`, `inspect`, `read`, `doctor`, and `listen` output.
 - Human-readable local output is the default in v0.
 - `listen` should prioritize recent actual thread message history before printing newly detected messages, suppress older backlog replay after the initial history window has been shown, and use periodic snapshot refresh as a fallback when live message events are too sparse.
+- `listen-and-send` should keep a stable bottom prompt in interactive terminals while new output is rendered above it.
 - stderr noise from the App Server should stay out of normal operator output unless debug logging is enabled.
 - JSON output can be added later for scripting, but it is not the default.
 
 ### Configuration
 
-- Precedence: CLI flags, then env vars, then local TOML config, then code defaults.
+- Runtime settings come from a TOML config file, optionally selected with `--config`.
 - Config must cover at least:
   - App Server spawn command and args
   - local data directory

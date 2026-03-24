@@ -118,7 +118,7 @@ Document future ideas, but do not implement them.
 - Tests: `pytest`.
 - Logging: structured stdlib `logging`.
 - Runtime model: one local async `asyncio` process for transport, ingestion, and command execution.
-- Configuration precedence: CLI flags, then env vars, then local TOML config, then code defaults.
+- Configuration source: local TOML config selected by CLI, then code defaults.
 - Favor explicit typed domain models and conservative protocol adapters over dynamic or implicit behavior.
 
 Suggested repo layout:
@@ -269,6 +269,7 @@ Required commands:
 - `read <threadId>` - fetch stored thread data from App Server
 - `listen <threadId>` - print recent thread messages first, then newly detected messages to the local console; support skipping history and limiting replay depth when requested, without replaying the older backlog again after resume, and use periodic refresh as a fallback when live message events are not emitted
 - `listen-and-send <threadId>` - run the same live listening flow as `listen`, while also accepting terminal input and sending each typed line as a fresh next turn on that thread; do not reuse an in-flight turn from the terminal path, and surface command-approval requests in the console when they occur
+- `listen-and-send` should keep a stable bottom input line in interactive terminals while new output prints above it
 - `doctor` - validate environment and connectivity
 
 Optional later:

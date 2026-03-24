@@ -35,21 +35,11 @@ uv run codex-i-gotta-run --help
 
 ## Configuration
 
-Configuration precedence is:
+Runtime settings live in a TOML config file.
 
-1. CLI flags
-2. environment variables
-3. local TOML config
-4. code defaults
-
-Supported environment variables:
-
-- `CODEX_I_GOTTA_RUN_SERVER_CMD`
-- `CODEX_I_GOTTA_RUN_SERVER_CWD`
-- `CODEX_I_GOTTA_RUN_DATA_DIR`
-- `CODEX_I_GOTTA_RUN_LOG_LEVEL`
-- `CODEX_I_GOTTA_RUN_EXPERIMENTAL_API`
-- `CODEX_I_GOTTA_RUN_OPTOUT_NOTIFICATIONS`
+- pass a config file explicitly with `--config /path/to/config.toml`
+- if `--config` is omitted, the CLI will use `./config.toml` when that file exists
+- code defaults still apply for omitted fields such as the default local registry path
 
 Example config file:
 
@@ -77,14 +67,6 @@ version = "0.1.0"
 # the same configured sandbox/approval defaults applied every time.
 # sandbox_mode = "danger-full-access"
 # approval_policy = "never"
-```
-
-Example with environment variables:
-
-```bash
-export CODEX_I_GOTTA_RUN_SERVER_CMD="codex app-server"
-export CODEX_I_GOTTA_RUN_DATA_DIR="$PWD/.local-data"
-uv run codex-i-gotta-run doctor
 ```
 
 Example with a config file:
@@ -130,6 +112,7 @@ Notes:
 - `listen-and-send` uses the same live listening flow as `listen`, but it also reads stdin and sends each non-empty typed line as a fresh `turn/start` on the same thread.
 - `listen-and-send` does not reuse an active in-flight turn. This keeps terminal input on the explicit `turn_start_options` path from `config.toml`.
 - when `listen-and-send` starts a new turn on a thread, it forwards configured `turn_start_options` from `config.toml` into `turn/start`. This is the deterministic way to keep new terminal-started turns on the configured approval and sandbox defaults.
+- when `listen-and-send` is attached to an interactive TTY, it keeps a stable bottom input prompt and prints new thread output above it.
 - if the App Server requests command approval during `listen-and-send`, the CLI prints the approval reason and command, then waits for a terminal reply such as `approve` or `cancel`.
 - `listen-and-send` exits cleanly on EOF, so `Ctrl-D` ends the session.
 - use `--no-history` if you only want future messages after the listener attaches.
@@ -174,12 +157,17 @@ python3 -m compileall src tests
 The test suite includes a fake stdio App Server at [tests/fake_app_server.py](/Volumes/Work/Projects/codex-i-gotta-run/tests/fake_app_server.py). You can use it for local CLI smoke tests:
 
 ```bash
-export CODEX_I_GOTTA_RUN_SERVER_CMD="python -m tests.fake_app_server"
 export FAKE_APP_SERVER_STATE_PATH="$PWD/.fake-app-server-state.json"
-export CODEX_I_GOTTA_RUN_DATA_DIR="$PWD/.fake-registry"
+cat > ./fake-config.toml <<'EOF'
+[server]
+command = ["python3", "-m", "tests.fake_app_server"]
 
-uv run codex-i-gotta-run doctor
-uv run codex-i-gotta-run threads
+[registry]
+data_dir = "./.fake-registry"
+EOF
+
+uv run codex-i-gotta-run doctor --config ./fake-config.toml
+uv run codex-i-gotta-run threads --config ./fake-config.toml
 ```
 
 ## Project Docs

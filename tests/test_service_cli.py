@@ -13,8 +13,8 @@ from cli import (
 from models import EventRecord
 
 
-def _seed_thread(fake_server_env: dict[str, str], *, prompts: list[str], active_last: bool = False) -> str:
-    state_path = Path(fake_server_env["FAKE_APP_SERVER_STATE_PATH"])
+def _seed_thread(fake_server_setup: dict[str, object], *, prompts: list[str], active_last: bool = False) -> str:
+    state_path = Path(str(fake_server_setup["state_path"]))
     thread_id = "thr_seeded"
     state = {
         "threads": {},
@@ -66,10 +66,12 @@ def _seed_thread(fake_server_env: dict[str, str], *, prompts: list[str], active_
     return thread_id
 
 
-def test_cli_threads_and_doctor(runner: CliRunner, fake_server_env: dict[str, str]) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["ship it"])
+def test_cli_threads_and_doctor(runner: CliRunner, fake_server_setup: dict[str, object]) -> None:
+    thread_id = _seed_thread(fake_server_setup, prompts=["ship it"])
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
-    list_result = runner.invoke(app, ["threads"], env=fake_server_env)
+    list_result = runner.invoke(app, ["threads", "--config", config_path], env=env)
     assert list_result.exit_code == 0
     assert "Threads" in list_result.stdout
     assert "Seeded" in list_result.stdout
@@ -77,31 +79,35 @@ def test_cli_threads_and_doctor(runner: CliRunner, fake_server_env: dict[str, st
     assert "Folder" in list_result.stdout
     assert "Last Turn" in list_result.stdout
 
-    doctor_result = runner.invoke(app, ["doctor"], env=fake_server_env)
+    doctor_result = runner.invoke(app, ["doctor", "--config", config_path], env=env)
     assert doctor_result.exit_code == 0
     assert "Doctor" in doctor_result.stdout
     assert "connect" in doctor_result.stdout
 
 
-def test_cli_read_and_inspect_thread(runner: CliRunner, fake_server_env: dict[str, str]) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["inspect me"])
+def test_cli_read_and_inspect_thread(runner: CliRunner, fake_server_setup: dict[str, object]) -> None:
+    thread_id = _seed_thread(fake_server_setup, prompts=["inspect me"])
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
-    read_result = runner.invoke(app, ["read", thread_id], env=fake_server_env)
+    read_result = runner.invoke(app, ["read", thread_id, "--config", config_path], env=env)
     assert read_result.exit_code == 0
     assert "Threads" in read_result.stdout
     assert "Turns" in read_result.stdout
     assert "Seeded" in read_result.stdout
 
-    inspect_result = runner.invoke(app, ["inspect", thread_id], env=fake_server_env)
+    inspect_result = runner.invoke(app, ["inspect", thread_id, "--config", config_path], env=env)
     assert inspect_result.exit_code == 0
     assert f"Thread: {thread_id}" in inspect_result.stdout
     assert "Turns" in inspect_result.stdout
 
 
-def test_cli_listen_streams_thread_messages_to_console(runner: CliRunner, fake_server_env: dict[str, str]) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["hold the turn"])
+def test_cli_listen_streams_thread_messages_to_console(runner: CliRunner, fake_server_setup: dict[str, object]) -> None:
+    thread_id = _seed_thread(fake_server_setup, prompts=["hold the turn"])
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
-    listen_result = runner.invoke(app, ["listen", thread_id, "--max-events", "1"], env=fake_server_env)
+    listen_result = runner.invoke(app, ["listen", thread_id, "--max-events", "1", "--config", config_path], env=env)
     assert listen_result.exit_code == 0
     assert f"Listening on thread {thread_id}" in listen_result.stdout
     assert "user: hold the turn" in listen_result.stdout
@@ -109,14 +115,16 @@ def test_cli_listen_streams_thread_messages_to_console(runner: CliRunner, fake_s
 
 def test_cli_listen_history_limit_does_not_replay_full_backlog_on_resume(
     runner: CliRunner,
-    fake_server_env: dict[str, str],
+    fake_server_setup: dict[str, object],
 ) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["first prompt", "second prompt"])
+    thread_id = _seed_thread(fake_server_setup, prompts=["first prompt", "second prompt"])
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
     listen_result = runner.invoke(
         app,
-        ["listen", thread_id, "--history-limit", "2", "--max-events", "1"],
-        env=fake_server_env,
+        ["listen", thread_id, "--history-limit", "2", "--max-events", "1", "--config", config_path],
+        env=env,
     )
     assert listen_result.exit_code == 0
     assert "user: second prompt" in listen_result.stdout
@@ -126,14 +134,16 @@ def test_cli_listen_history_limit_does_not_replay_full_backlog_on_resume(
 
 def test_cli_listen_and_send_starts_new_turn_even_when_thread_is_active(
     runner: CliRunner,
-    fake_server_env: dict[str, str],
+    fake_server_setup: dict[str, object],
 ) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["hold the turn"], active_last=True)
+    thread_id = _seed_thread(fake_server_setup, prompts=["hold the turn"], active_last=True)
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
     result = runner.invoke(
         app,
-        ["listen-and-send", thread_id, "--max-events", "2"],
-        env=fake_server_env,
+        ["listen-and-send", thread_id, "--max-events", "2", "--config", config_path],
+        env=env,
         input="finish now\n",
     )
     assert result.exit_code == 0
@@ -146,14 +156,16 @@ def test_cli_listen_and_send_starts_new_turn_even_when_thread_is_active(
 
 def test_cli_listen_and_send_starts_next_turn_when_thread_is_idle(
     runner: CliRunner,
-    fake_server_env: dict[str, str],
+    fake_server_setup: dict[str, object],
 ) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["completed prompt"], active_last=False)
+    thread_id = _seed_thread(fake_server_setup, prompts=["completed prompt"], active_last=False)
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
     result = runner.invoke(
         app,
-        ["listen-and-send", thread_id, "--max-events", "2"],
-        env=fake_server_env,
+        ["listen-and-send", thread_id, "--max-events", "2", "--config", config_path],
+        env=env,
         input="new follow up\n",
     )
     assert result.exit_code == 0
@@ -166,14 +178,16 @@ def test_cli_listen_and_send_starts_next_turn_when_thread_is_idle(
 
 def test_cli_listen_and_send_handles_command_approval_requests(
     runner: CliRunner,
-    fake_server_env: dict[str, str],
+    fake_server_setup: dict[str, object],
 ) -> None:
-    thread_id = _seed_thread(fake_server_env, prompts=["completed prompt"], active_last=False)
+    thread_id = _seed_thread(fake_server_setup, prompts=["completed prompt"], active_last=False)
+    config_path = str(fake_server_setup["config_path"])
+    env = dict(fake_server_setup["env"])
 
     result = runner.invoke(
         app,
-        ["listen-and-send", thread_id, "--max-events", "6"],
-        env=fake_server_env,
+        ["listen-and-send", thread_id, "--max-events", "6", "--config", config_path],
+        env=env,
         input="git commit\napprove\n",
     )
     assert result.exit_code == 0
