@@ -295,7 +295,7 @@ Required commands:
 - `steer <threadId> <turnId> "<prompt>"` - steer an active turn
 - `interrupt <threadId> <turnId>` - interrupt an active turn
 - `tail <threadId>` - stream formatted live events for a thread
-- `listen <threadId>` - print recent thread messages first, then newly detected messages to the local console; support skipping history and limiting replay depth when requested, without replaying the older backlog again after resume
+- `listen <threadId>` - print recent thread messages first, then newly detected messages to the local console; support skipping history and limiting replay depth when requested, without replaying the older backlog again after resume, and use periodic refresh as a fallback when live message events are not emitted
 - `queue <threadId> "<prompt>"` - enqueue follow-up input
 - `autosteer <threadId>` - process queued inputs for a thread using v0 rules
 - `status` - show connection state, active turns, and queue state

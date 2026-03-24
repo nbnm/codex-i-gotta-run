@@ -101,7 +101,7 @@ Core commands:
 - `steer <thread_id> <turn_id> "<prompt>"`
 - `interrupt <thread_id> <turn_id>`
 - `tail <thread_id> [--max-events N]`
-- `listen <thread_id> [--max-events N] [--no-history] [--history-limit N]`
+- `listen <thread_id> [--max-events N] [--no-history] [--history-limit N] [--refresh-seconds N]`
 - `queue <thread_id> "<prompt>" [--mode auto|steer|continue]`
 - `autosteer <thread_id>`
 - `status`
@@ -122,6 +122,7 @@ uv run codex-i-gotta-run tail <thread_id> --max-events 10
 uv run codex-i-gotta-run listen <thread_id> --max-events 10
 uv run codex-i-gotta-run listen <thread_id> --no-history
 uv run codex-i-gotta-run listen <thread_id> --history-limit 10
+uv run codex-i-gotta-run listen <thread_id> --refresh-seconds 1
 uv run codex-i-gotta-run queue <thread_id> "Finish once the current task completes"
 uv run codex-i-gotta-run autosteer <thread_id>
 uv run codex-i-gotta-run status
@@ -134,8 +135,10 @@ Notes:
 - `tail` resumes the thread first so the App Server will emit live notifications.
 - `listen` replays recent actual thread messages from history, then resumes the thread and prints newly detected messages.
 - `listen` marks the full current snapshot as already seen before live listening starts, so older backlog messages do not get replayed again on the first resume-triggered refresh.
+- `listen` prefers real live message events when they arrive, but it also performs periodic `thread/read` refreshes while attached so new messages still appear when the App Server only emits status-style notifications on that connection.
 - use `--no-history` if you only want future messages after the listener attaches.
 - use `--history-limit` to control how many recent messages are replayed first. The default is `20`, and older backlog messages remain suppressed unless they are part of the selected replay window.
+- use `--refresh-seconds` to control the fallback snapshot refresh interval while listening. The default is `2.0`.
 - `listen` is meant for operator visibility, so it prefers showing recent message history first instead of waiting silently for the next event.
 - App Server stderr warnings are suppressed at normal log levels so the console stays focused on thread messages.
 - `autosteer` uses the v0 rule set:

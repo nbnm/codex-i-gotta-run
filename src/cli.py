@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -310,6 +311,10 @@ def listen(
     max_events: Annotated[int | None, typer.Option("--max-events", help="Stop after this many events.")] = None,
     no_history: Annotated[bool, typer.Option("--no-history", help="Skip replaying recent thread messages before listening.")] = False,
     history_limit: Annotated[int, typer.Option("--history-limit", help="Number of most recent messages to replay before listening.")] = 20,
+    refresh_seconds: Annotated[
+        float,
+        typer.Option("--refresh-seconds", help="Fallback snapshot refresh interval while listening."),
+    ] = 2.0,
     config: ConfigOption = None,
     data_dir: DataDirOption = None,
     server_cmd: ServerCmdOption = None,
@@ -361,6 +366,15 @@ def listen(
             for message_id, _ in messages:
                 seen_message_ids.add(message_id)
 
+        stop_refresh = asyncio.Event()
+
+        async def refresh_loop() -> None:
+            while not stop_refresh.is_set():
+                await asyncio.sleep(refresh_seconds)
+                if stop_refresh.is_set():
+                    break
+                await sync_messages(print_history=False)
+
         async def on_event(event: EventRecord) -> None:
             live_message = _extract_live_message_entry(event)
             if live_message is not None:
@@ -371,11 +385,18 @@ def listen(
                 return
             await sync_messages(print_history=False)
 
-        await service.listen(
-            thread_id,
-            on_event,
-            max_events=max_events,
-        )
+        refresh_task = asyncio.create_task(refresh_loop())
+        try:
+            await service.listen(
+                thread_id,
+                on_event,
+                max_events=max_events,
+            )
+        finally:
+            stop_refresh.set()
+            refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await refresh_task
 
     _run(_execute_with_service(config, data_dir, server_cmd, operation))
 
