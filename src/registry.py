@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from models import ConnectionState, EventRecord, ThreadRecord, TurnRecord
+from models import ConnectionState, EventRecord, TelegramSessionRecord, ThreadRecord, TurnRecord
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -17,6 +17,7 @@ class JsonRegistry:
         self.data_dir = data_dir
         self.threads_dir = self.data_dir / "threads"
         self.turns_dir = self.data_dir / "turns"
+        self.telegram_sessions_dir = self.data_dir / "telegram_sessions"
         self.events_path = self.data_dir / "events.jsonl"
         self.connection_state_path = self.data_dir / "connection_state.json"
         self._ensure_dirs()
@@ -25,6 +26,7 @@ class JsonRegistry:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.threads_dir.mkdir(parents=True, exist_ok=True)
         self.turns_dir.mkdir(parents=True, exist_ok=True)
+        self.telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
         self.events_path.touch(exist_ok=True)
 
     def save_thread(self, thread: ThreadRecord) -> None:
@@ -74,6 +76,20 @@ class JsonRegistry:
 
     def get_connection_state(self) -> ConnectionState | None:
         return self._load_model(self.connection_state_path, ConnectionState)
+
+    def save_telegram_session(self, session: TelegramSessionRecord) -> None:
+        self._atomic_write(self.telegram_sessions_dir / f"{session.thread_id}.json", session.model_dump(mode="json"))
+
+    def get_telegram_session(self, thread_id: str) -> TelegramSessionRecord | None:
+        return self._load_model(self.telegram_sessions_dir / f"{thread_id}.json", TelegramSessionRecord)
+
+    def list_telegram_sessions(self) -> list[TelegramSessionRecord]:
+        return self._load_collection(self.telegram_sessions_dir, TelegramSessionRecord)
+
+    def delete_telegram_session(self, thread_id: str) -> None:
+        path = self.telegram_sessions_dir / f"{thread_id}.json"
+        if path.exists():
+            path.unlink()
 
     def _atomic_write(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

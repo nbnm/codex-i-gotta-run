@@ -20,6 +20,32 @@ class ClientInfo(Model):
     version: str = "0.1.0"
 
 
+class TelegramConfig(Model):
+    bot_token: str | None = None
+    api_base_url: str = "https://api.telegram.org"
+    poll_timeout_seconds: int = 30
+    allowed_chat_ids: list[int] = Field(default_factory=list)
+    username: str | None = None
+    default_chat_id: int | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.bot_token)
+
+
+class TelegramSessionRecord(Model):
+    thread_id: str
+    chat_id: int | None = None
+    message_thread_id: int | None = None
+    topic_name: str | None = None
+    chat_username: str | None = None
+    chat_type: str | None = None
+    last_update_id: int | None = None
+    started_at: str = Field(default_factory=utc_now_iso)
+    last_inbound_at: str | None = None
+    last_outbound_at: str | None = None
+
+
 class ThreadStatus(Model):
     type: str = "unknown"
     active_flags: list[str] = Field(default_factory=list, alias="activeFlags")

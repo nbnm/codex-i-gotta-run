@@ -14,6 +14,25 @@ name = "codex-i-gotta-run"
 title = "codex-i-gotta-run"
 version = "0.1.0"
 
+[telegram]
+# Resolve the bot token from this environment variable name.
+# Example: export TELEGRAM_BOT_TOKEN=123456:abc...
+telegram_bot_token_env = "TELEGRAM_BOT_TOKEN"
+# Optional override for local proxies or testing.
+api_base_url = "https://api.telegram.org"
+# Long-poll timeout in seconds for getUpdates.
+poll_timeout_seconds = 30
+# Private-threaded Telegram chat used for operator mode.
+# `listen-and-send` reuses Telegram's `message_thread_id` when the chat provides one.
+# `hand-off` creates one private thread/topic per selected Codex thread in this chat.
+telegram_default_chat_id_env = "TELEGRAM_DEFAULT_CHAT_ID"
+# Resolve the allowed Telegram chat IDs from a comma-separated environment variable.
+# Example: export TELEGRAM_ALLOWED_CHAT_IDS=208920039
+telegram_allowed_chat_ids_env = "TELEGRAM_ALLOWED_CHAT_IDS"
+# Resolve the allowed Telegram username and mention target from this environment variable name.
+# Example: export TELEGRAM_BOT_ALLOW_USERNAME=@your_username
+telegram_bot_allow_username = "TELEGRAM_BOT_ALLOW_USERNAME"
+
 [turn_start_options]
 sandbox_mode = "danger-full-access"
 approval_policy = "never"

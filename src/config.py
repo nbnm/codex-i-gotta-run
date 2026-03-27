@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import Field
 
-from models import ClientInfo, Model
+from models import ClientInfo, Model, TelegramConfig
 
 
 def _default_data_dir() -> Path:
@@ -29,6 +29,7 @@ class AppConfig(Model):
     experimental_api: bool = False
     opt_out_notification_methods: list[str] = Field(default_factory=list)
     turn_start_options: dict[str, Any] = Field(default_factory=dict)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     log_level: str = "INFO"
     recent_event_limit: int = 20
 
@@ -58,6 +59,41 @@ def _merge_dict(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _resolve_optional_env_var(name: Any) -> str | None:
+    if not isinstance(name, str):
+        return None
+    env_name = name.strip()
+    if not env_name:
+        return None
+    return os.environ.get(env_name)
+
+
+def _resolve_optional_env_int(name: Any) -> int | None:
+    value = _resolve_optional_env_var(name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _resolve_optional_env_int_list(name: Any) -> list[int]:
+    value = _resolve_optional_env_var(name)
+    if value is None:
+        return []
+    resolved: list[int] = []
+    for item in value.split(","):
+        normalized = item.strip()
+        if not normalized:
+            continue
+        try:
+            resolved.append(int(normalized))
+        except ValueError:
+            continue
+    return resolved
+
+
 def _parse_config_file(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
         return {}
@@ -68,15 +104,27 @@ def _parse_config_file(path: Path | None) -> dict[str, Any]:
     client = raw.get("client", {})
     registry = raw.get("registry", {})
     logging = raw.get("logging", {})
+    telegram = raw.get("telegram", {})
     turn_start_options = raw.get("turn_start_options", {})
+    telegram_bot_token = _resolve_optional_env_var(telegram.get("telegram_bot_token_env"))
+    telegram_username = _resolve_optional_env_var(telegram.get("telegram_bot_allow_username"))
+    telegram_default_chat_id = _resolve_optional_env_int(telegram.get("telegram_default_chat_id_env"))
+    telegram_allowed_chat_ids = _resolve_optional_env_int_list(telegram.get("telegram_allowed_chat_ids_env"))
 
-    return {
+    parsed: dict[str, Any] = {
         "app_server_command": list(server.get("command", [])),
         "app_server_cwd": server.get("cwd"),
         "experimental_api": bool(server.get("experimental_api", False)),
         "opt_out_notification_methods": list(server.get("opt_out_notification_methods", [])),
         "turn_start_options": dict(turn_start_options) if isinstance(turn_start_options, dict) else {},
-        "data_dir": registry.get("data_dir"),
+        "telegram": {
+            "bot_token": telegram_bot_token,
+            "api_base_url": telegram.get("api_base_url", TelegramConfig().api_base_url),
+            "poll_timeout_seconds": telegram.get("poll_timeout_seconds", TelegramConfig().poll_timeout_seconds),
+            "allowed_chat_ids": telegram_allowed_chat_ids if telegram_allowed_chat_ids else list(telegram.get("allowed_chat_ids", [])),
+            "username": telegram_username,
+            "default_chat_id": telegram_default_chat_id if telegram_default_chat_id is not None else telegram.get("default_chat_id"),
+        },
         "log_level": logging.get("level", "INFO"),
         "client_info": {
             "name": client.get("name", ClientInfo().name),
@@ -84,6 +132,10 @@ def _parse_config_file(path: Path | None) -> dict[str, Any]:
             "version": client.get("version", ClientInfo().version),
         },
     }
+    data_dir = registry.get("data_dir")
+    if data_dir is not None:
+        parsed["data_dir"] = data_dir
+    return parsed
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:
