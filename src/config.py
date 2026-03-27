@@ -68,6 +68,32 @@ def _resolve_optional_env_var(name: Any) -> str | None:
     return os.environ.get(env_name)
 
 
+def _resolve_optional_env_int(name: Any) -> int | None:
+    value = _resolve_optional_env_var(name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _resolve_optional_env_int_list(name: Any) -> list[int]:
+    value = _resolve_optional_env_var(name)
+    if value is None:
+        return []
+    resolved: list[int] = []
+    for item in value.split(","):
+        normalized = item.strip()
+        if not normalized:
+            continue
+        try:
+            resolved.append(int(normalized))
+        except ValueError:
+            continue
+    return resolved
+
+
 def _parse_config_file(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
         return {}
@@ -80,9 +106,10 @@ def _parse_config_file(path: Path | None) -> dict[str, Any]:
     logging = raw.get("logging", {})
     telegram = raw.get("telegram", {})
     turn_start_options = raw.get("turn_start_options", {})
-    telegram_bot_token = telegram.get("bot_token")
-    if not telegram_bot_token:
-        telegram_bot_token = _resolve_optional_env_var(telegram.get("bot_token_env"))
+    telegram_bot_token = _resolve_optional_env_var(telegram.get("telegram_bot_token_env"))
+    telegram_username = _resolve_optional_env_var(telegram.get("telegram_bot_allow_username"))
+    telegram_default_chat_id = _resolve_optional_env_int(telegram.get("telegram_default_chat_id_env"))
+    telegram_allowed_chat_ids = _resolve_optional_env_int_list(telegram.get("telegram_allowed_chat_ids_env"))
 
     parsed: dict[str, Any] = {
         "app_server_command": list(server.get("command", [])),
@@ -94,9 +121,9 @@ def _parse_config_file(path: Path | None) -> dict[str, Any]:
             "bot_token": telegram_bot_token,
             "api_base_url": telegram.get("api_base_url", TelegramConfig().api_base_url),
             "poll_timeout_seconds": telegram.get("poll_timeout_seconds", TelegramConfig().poll_timeout_seconds),
-            "allowed_chat_ids": list(telegram.get("allowed_chat_ids", [])),
-            "username": telegram.get("username"),
-            "default_chat_id": telegram.get("default_chat_id"),
+            "allowed_chat_ids": telegram_allowed_chat_ids if telegram_allowed_chat_ids else list(telegram.get("allowed_chat_ids", [])),
+            "username": telegram_username,
+            "default_chat_id": telegram_default_chat_id if telegram_default_chat_id is not None else telegram.get("default_chat_id"),
         },
         "log_level": logging.get("level", "INFO"),
         "client_info": {

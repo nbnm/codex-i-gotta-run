@@ -64,17 +64,18 @@ title = "codex-i-gotta-run"
 version = "0.1.0"
 
 [telegram]
-# Either set the token directly or prefer `bot_token_env`.
-bot_token = ""
-bot_token_env = "TELEGRAM_BOT_TOKEN"
+# Resolve the bot token from this environment variable name.
+telegram_bot_token_env = "TELEGRAM_BOT_TOKEN"
 api_base_url = "https://api.telegram.org"
 poll_timeout_seconds = 30
-# Private chat used for Telegram operator mode.
+# Private threaded chat used for Telegram operator mode.
 # `listen-and-send` reuses `message_thread_id` when Telegram provides it.
 # `hand-off` creates one private thread/topic per selected Codex thread in this chat.
-default_chat_id = 123456789
-allowed_chat_ids = [123456789]
-username = "@your_telegram_username"
+telegram_default_chat_id_env = "TELEGRAM_DEFAULT_CHAT_ID"
+# Resolve allowed Telegram chat IDs from a comma-separated environment variable.
+telegram_allowed_chat_ids_env = "TELEGRAM_ALLOWED_CHAT_IDS"
+# Resolve the allowed username and attention-mention target from this environment variable name.
+telegram_bot_allow_username = "TELEGRAM_BOT_ALLOW_USERNAME"
 
 [turn_start_options]
 # Raw passthrough options for new turns started on existing threads.
@@ -89,6 +90,22 @@ Example with a config file:
 ```bash
 uv run codex-i-gotta-run doctor --config ./config.toml
 ```
+
+Telegram values are env-name references, not inline secrets or inline chat identifiers. Export the real values before running the CLI:
+
+```bash
+export TELEGRAM_BOT_TOKEN=123456:abc...
+export TELEGRAM_BOT_ALLOW_USERNAME=@your_username
+export TELEGRAM_DEFAULT_CHAT_ID=208920039
+export TELEGRAM_ALLOWED_CHAT_IDS=208920039,-1001234567890
+```
+
+Notes:
+
+- `telegram_bot_token_env` points to the bot token environment variable.
+- `telegram_bot_allow_username` points to the single allowed Telegram username and is also used for approval and final-answer mentions.
+- `telegram_default_chat_id_env` is still required for proactive Telegram flows such as `hand-off`, because the bot must know which chat to target before an inbound message binds a session.
+- `telegram_allowed_chat_ids_env` expects a comma-separated list of numeric chat IDs.
 
 ## CLI Commands
 
@@ -141,7 +158,7 @@ Notes:
 - if the App Server requests command approval during `listen-and-send`, the CLI prints the approval reason and command, then waits for a terminal reply such as `approve` or `cancel`.
 - in Telegram private-thread mode, the run starts in the configured private chat and adopts the first seen `message_thread_id` for that run when Telegram includes one.
 - once a Telegram `message_thread_id` has been observed for the run, only messages from that same private thread are accepted as operator input.
-- in Telegram mode, role prefixes such as `user`, `approval`, and `assistant/commentary` are rendered in bold, and approval prompts use Telegram reply-keyboard buttons such as `approve`, `approve-amend`, and `cancel`.
+- in Telegram mode, role prefixes such as `user`, `approval`, and `assistant/commentary` are rendered in bold, approval prompts use Telegram reply-keyboard buttons such as `approve`, `approve-amend`, and `cancel`, and approval/final-answer messages explicitly mention the configured username.
 - `listen-and-send` exits cleanly on EOF, so `Ctrl-D` ends the session.
 - use `--no-history` if you only want future messages after the listener attaches.
 - use `--history-limit` to control how many recent messages are replayed first. The default is `20`, and older backlog messages remain suppressed unless they are part of the selected replay window.
@@ -163,7 +180,7 @@ The registry stores:
 - turn snapshots
 - connection state
 - append-only `events.jsonl`
-- Telegram session snapshots, including the bound chat, optional private-chat `message_thread_id`, and update offset for the current run
+- Telegram session snapshots, including the bound chat, optional private-chat `message_thread_id`, tracked Telegram topic bindings, and update offset for the current run
 
 This state is a cache and recovery aid, not the primary protocol surface.
 

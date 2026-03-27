@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -27,15 +28,18 @@ def _write_telegram_config(tmp_path: Path, *, default_chat_id: int | None = 777)
                 f'data_dir = "{(tmp_path / "registry").as_posix()}"',
                 "",
                 "[telegram]",
-                'bot_token = "test-token"',
-                "allowed_chat_ids = [777]",
-                'username = "@oleg"',
-                *([f"default_chat_id = {default_chat_id}", ""] if default_chat_id is not None else []),
+                'telegram_bot_token_env = "TEST_TELEGRAM_BOT_TOKEN"',
+                'telegram_allowed_chat_ids_env = "TEST_TELEGRAM_ALLOWED_CHAT_IDS"',
+                'telegram_bot_allow_username = "TEST_TELEGRAM_BOT_ALLOW_USERNAME"',
+                *([f'telegram_default_chat_id_env = "TEST_TELEGRAM_DEFAULT_CHAT_ID"', ""] if default_chat_id is not None else []),
                 "",
             ]
         ),
         encoding="utf-8",
     )
+    if default_chat_id is not None:
+        os.environ["TEST_TELEGRAM_DEFAULT_CHAT_ID"] = str(default_chat_id)
+    os.environ["TEST_TELEGRAM_ALLOWED_CHAT_IDS"] = "777"
     return config_path, state_path
 
 
@@ -124,6 +128,19 @@ class FakeTelegramApi:
 
     async def close(self) -> None:
         self.closed = True
+
+
+def _telegram_env(state_path: Path) -> dict[str, str]:
+    env = {
+        "FAKE_APP_SERVER_STATE_PATH": str(state_path),
+        "TEST_TELEGRAM_BOT_TOKEN": "test-token",
+        "TEST_TELEGRAM_BOT_ALLOW_USERNAME": "@oleg",
+        "TEST_TELEGRAM_ALLOWED_CHAT_IDS": "777",
+    }
+    current_chat_id = os.environ.get("TEST_TELEGRAM_DEFAULT_CHAT_ID")
+    if current_chat_id is not None:
+        env["TEST_TELEGRAM_DEFAULT_CHAT_ID"] = current_chat_id
+    return env
 
 
 @pytest.mark.asyncio
@@ -400,7 +417,7 @@ def test_cli_listen_and_send_uses_telegram_interface(
 ) -> None:
     config_path, state_path = _write_telegram_config(tmp_path)
     thread_id = _seed_thread(state_path, prompt="completed prompt")
-    env = {"FAKE_APP_SERVER_STATE_PATH": str(state_path)}
+    env = _telegram_env(state_path)
     fake_api = FakeTelegramApi(
         updates=[
             [
@@ -452,7 +469,7 @@ def test_cli_listen_and_send_prefers_configured_default_chat_over_stale_cached_s
     thread_id = _seed_thread(state_path, prompt="completed prompt")
     registry = JsonRegistry(tmp_path / "registry")
     registry.save_telegram_session(TelegramSessionRecord(thread_id=thread_id, chat_id=123456789))
-    env = {"FAKE_APP_SERVER_STATE_PATH": str(state_path)}
+    env = _telegram_env(state_path)
     fake_api = FakeTelegramApi(
         updates=[
             [
@@ -509,7 +526,7 @@ def test_cli_listen_and_send_starts_fresh_telegram_session_each_run(
             chat_username="old-user",
         )
     )
-    env = {"FAKE_APP_SERVER_STATE_PATH": str(state_path)}
+    env = _telegram_env(state_path)
     fake_api = FakeTelegramApi(
         updates=[
             [
@@ -560,7 +577,7 @@ def test_cli_listen_and_send_telegram_approval_uses_buttons(
 ) -> None:
     config_path, state_path = _write_telegram_config(tmp_path, default_chat_id=777)
     thread_id = _seed_thread(state_path, prompt="completed prompt")
-    env = {"FAKE_APP_SERVER_STATE_PATH": str(state_path)}
+    env = _telegram_env(state_path)
     fake_api = FakeTelegramApi(
         updates=[
             [
@@ -658,7 +675,7 @@ def test_cli_hand_off_attaches_five_most_recent_active_threads_to_telegram_topic
     registry.save_telegram_session(
         TelegramSessionRecord(thread_id="thr_other_chat", chat_id=999, message_thread_id=555, topic_name="other chat topic")
     )
-    env = {"FAKE_APP_SERVER_STATE_PATH": str(state_path)}
+    env = _telegram_env(state_path)
     fake_api = FakeTelegramApi()
     monkeypatch.setattr("cli.HttpTelegramBotApi", lambda config: fake_api)
 
@@ -784,7 +801,7 @@ def test_cli_hand_off_backfills_with_recent_idle_threads_when_active_threads_are
         "pending_approvals": {},
     }
     state_path.write_text(json.dumps(state), encoding="utf-8")
-    env = {"FAKE_APP_SERVER_STATE_PATH": str(state_path)}
+    env = _telegram_env(state_path)
     fake_api = FakeTelegramApi()
     monkeypatch.setattr("cli.HttpTelegramBotApi", lambda config: fake_api)
 

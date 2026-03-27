@@ -128,7 +128,7 @@ That means:
 - Logging: structured stdlib `logging`.
 - Runtime model: one local async `asyncio` process for transport, ingestion, and command execution.
 - Configuration source: local TOML config file selected by CLI, then code defaults.
-- Environment variables are not part of runtime configuration, except when the config file explicitly references a secret such as `telegram.bot_token_env`.
+- Environment variables are not part of runtime configuration, except when the config file explicitly references env variable names such as `telegram.telegram_bot_token_env`, `telegram.telegram_bot_allow_username`, `telegram.telegram_default_chat_id_env`, and `telegram.telegram_allowed_chat_ids_env`.
 - Favor explicit typed domain models and conservative protocol adapters over dynamic or implicit behavior.
 
 Suggested repo layout:
