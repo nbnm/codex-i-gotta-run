@@ -95,7 +95,7 @@ def _parse_config_file(path: Path | None) -> dict[str, Any]:
             "api_base_url": telegram.get("api_base_url", TelegramConfig().api_base_url),
             "poll_timeout_seconds": telegram.get("poll_timeout_seconds", TelegramConfig().poll_timeout_seconds),
             "allowed_chat_ids": list(telegram.get("allowed_chat_ids", [])),
-            "allowed_usernames": list(telegram.get("allowed_usernames", [])),
+            "username": telegram.get("username"),
             "default_chat_id": telegram.get("default_chat_id"),
         },
         "log_level": logging.get("level", "INFO"),

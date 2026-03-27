@@ -54,7 +54,7 @@ def test_load_config_parses_telegram_settings(tmp_path: Path) -> None:
                 'bot_token = "test-token"',
                 'default_chat_id = 777',
                 "allowed_chat_ids = [777, 888]",
-                'allowed_usernames = ["oleg"]',
+                'username = "@oleg"',
                 "poll_timeout_seconds = 10",
                 "",
             ]
@@ -67,7 +67,7 @@ def test_load_config_parses_telegram_settings(tmp_path: Path) -> None:
     assert config.telegram.bot_token == "test-token"
     assert config.telegram.default_chat_id == 777
     assert config.telegram.allowed_chat_ids == [777, 888]
-    assert config.telegram.allowed_usernames == ["oleg"]
+    assert config.telegram.username == "@oleg"
     assert config.telegram.poll_timeout_seconds == 10
 
 

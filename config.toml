@@ -23,12 +23,14 @@ bot_token_env = "TELEGRAM_BOT_TOKEN"
 api_base_url = "https://api.telegram.org"
 # Long-poll timeout in seconds for getUpdates.
 poll_timeout_seconds = 30
+# Private-threaded Telegram chat used for operator mode.
+# `listen-and-send` reuses Telegram's `message_thread_id` when the chat provides one.
+# `hand-off` creates one private thread/topic per selected Codex thread in this chat.
+default_chat_id = 208920039
 # Restrict access to specific Telegram chats when desired.
 allowed_chat_ids = [208920039]
-# Restrict access to specific Telegram usernames when desired.
-allowed_usernames = ["@neither_be_nor_me"]
-# Optional eager binding for a single operator chat.
-default_chat_id = 208920039
+# Restrict access and attention mentions to a single Telegram username.
+username = "@neither_be_nor_me"
 
 [turn_start_options]
 sandbox_mode = "danger-full-access"

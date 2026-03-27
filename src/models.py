@@ -25,7 +25,7 @@ class TelegramConfig(Model):
     api_base_url: str = "https://api.telegram.org"
     poll_timeout_seconds: int = 30
     allowed_chat_ids: list[int] = Field(default_factory=list)
-    allowed_usernames: list[str] = Field(default_factory=list)
+    username: str | None = None
     default_chat_id: int | None = None
 
     @property
@@ -36,6 +36,8 @@ class TelegramConfig(Model):
 class TelegramSessionRecord(Model):
     thread_id: str
     chat_id: int | None = None
+    message_thread_id: int | None = None
+    topic_name: str | None = None
     chat_username: str | None = None
     chat_type: str | None = None
     last_update_id: int | None = None

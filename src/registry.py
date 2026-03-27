@@ -83,6 +83,9 @@ class JsonRegistry:
     def get_telegram_session(self, thread_id: str) -> TelegramSessionRecord | None:
         return self._load_model(self.telegram_sessions_dir / f"{thread_id}.json", TelegramSessionRecord)
 
+    def list_telegram_sessions(self) -> list[TelegramSessionRecord]:
+        return self._load_collection(self.telegram_sessions_dir, TelegramSessionRecord)
+
     def delete_telegram_session(self, thread_id: str) -> None:
         path = self.telegram_sessions_dir / f"{thread_id}.json"
         if path.exists():

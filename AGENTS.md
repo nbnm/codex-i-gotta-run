@@ -101,6 +101,8 @@ That means:
 - the sidecar still talks only to the local Codex App Server
 - Telegram does not add multi-user workflow, remote orchestration, or autonomous routing in v0
 - start with Telegram Bot API polling from the local sidecar process
+- support only Telegram private-threaded delivery; do not build supergroup-specific operator flows in the current scope
+- support a `hand-off` command that fans out a small set of recent Codex threads, preferring active threads and backfilling with idle ones, into separate Telegram private threads/topics inside one configured chat
 - webhook mode may be documented as a future option, but not implemented in the current scope unless requested separately
 
 ## Core design principles
@@ -279,6 +281,7 @@ Required commands:
 - `listen-and-send <threadId>` - run the same live listening flow as `listen`, while also accepting terminal input and sending each typed line as a fresh next turn on that thread; do not reuse an in-flight turn from the terminal path, and surface command-approval requests in the console when they occur
 - `listen-and-send` should keep a stable bottom input line in interactive terminals while new output prints above it
 - `listen-and-send --interface telegram <threadId>` - run the same live listening flow, but route operator-visible output and operator replies through Telegram instead of stdin/stdout; the sidecar should start a local Telegram bridge process inside the same runtime and preserve enough binding state to recover after restart
+- `hand-off` - select up to 5 recent threads by most recent activity, preferring active threads and backfilling with idle threads, create one Telegram private thread/topic per selected Codex thread, and run the live listen/send flow for all of them concurrently through one shared Telegram polling loop
 - `doctor` - validate config file, local server command, and connectivity
 
 Optional later:
@@ -320,10 +323,11 @@ Rules:
 Telegram mode follows the same turn semantics as terminal mode.
 
 Rules:
+- Telegram mode uses a configured private chat and reuses `message_thread_id` when Telegram provides private-threaded updates for that chat
 - each accepted Telegram text message starts the next explicit `turn/start` on the same thread unless the sidecar is currently waiting for an approval response
 - when approval is pending, Telegram replies such as `approve` or `cancel` must answer that approval request instead of starting a new turn
 - Telegram mode must use the same `turn_start_options` forwarding as terminal mode
-- Telegram binding state should be persisted locally so the sidecar can recover the chat association and update offset after restart
+- Telegram binding state should be persisted locally so the sidecar can recover the chat association, optional private-thread identifier, and update offset during the current run
 - Telegram authorization should be explicit through config and deterministic chat binding, not inferred from ambient traffic
 
 ## Testing requirements

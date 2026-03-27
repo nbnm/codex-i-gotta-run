@@ -14,6 +14,8 @@ The project treats the App Server as the source of truth for live thread and tur
 - validates local connectivity with `doctor`
 - replays recent actual thread messages and then listens for new messages in the console
 - lets an operator start a fresh next turn from the terminal while listening
+- can route `listen-and-send` operator I/O through Telegram using a private chat, reusing `message_thread_id` when Telegram provides threaded private-chat updates
+- can hand off the 5 most recently active Codex threads to Telegram, with one Telegram private thread/topic per Codex thread
 
 ## Requirements
 
@@ -61,6 +63,19 @@ name = "codex-i-gotta-run"
 title = "codex-i-gotta-run"
 version = "0.1.0"
 
+[telegram]
+# Either set the token directly or prefer `bot_token_env`.
+bot_token = ""
+bot_token_env = "TELEGRAM_BOT_TOKEN"
+api_base_url = "https://api.telegram.org"
+poll_timeout_seconds = 30
+# Private chat used for Telegram operator mode.
+# `listen-and-send` reuses `message_thread_id` when Telegram provides it.
+# `hand-off` creates one private thread/topic per selected Codex thread in this chat.
+default_chat_id = 123456789
+allowed_chat_ids = [123456789]
+username = "@your_telegram_username"
+
 [turn_start_options]
 # Raw passthrough options for new turns started on existing threads.
 # Use this when `listen-and-send` needs to start the next turn and you want
@@ -84,6 +99,8 @@ Core commands:
 - `read <thread_id>`
 - `listen <thread_id> [--max-events N] [--no-history] [--history-limit N] [--refresh-seconds N]`
 - `listen-and-send <thread_id> [--max-events N] [--no-history] [--history-limit N] [--refresh-seconds N]`
+- `listen-and-send <thread_id> --interface telegram [--telegram-chat-id CHAT_ID]`
+- `hand-off [--limit N] [--telegram-chat-id CHAT_ID] [--max-events N]`
 - `doctor`
 
 Examples:
@@ -98,6 +115,8 @@ uv run codex-i-gotta-run listen <thread_id> --no-history
 uv run codex-i-gotta-run listen <thread_id> --history-limit 10
 uv run codex-i-gotta-run listen <thread_id> --refresh-seconds 1
 uv run codex-i-gotta-run listen-and-send <thread_id>
+uv run codex-i-gotta-run listen-and-send <thread_id> --interface telegram
+uv run codex-i-gotta-run hand-off
 ```
 
 Notes:
@@ -110,10 +129,19 @@ Notes:
 - `listen` prefers real live message events when they arrive, but it also performs periodic `thread/read` refreshes while attached so new messages still appear when the App Server only emits status-style notifications on that connection.
 - `listen` ignores token-by-token command or message delta fragments in console output and waits for stable snapshot-backed messages such as `assistant/commentary: ...`.
 - `listen-and-send` uses the same live listening flow as `listen`, but it also reads stdin and sends each non-empty typed line as a fresh `turn/start` on the same thread.
+- `listen-and-send --interface telegram` uses the same turn semantics, but sends output and accepts follow-up input through Telegram instead of stdin/stdout.
+- Telegram mode uses a private chat with the bot. When Telegram includes `message_thread_id` for that chat, the sidecar reuses it so the run stays scoped to that private thread.
+- `hand-off` prefers the most recently active Codex threads from the App Server and backfills with the most recent idle threads until `--limit` is reached, with a default of `5`, then creates one Telegram private thread/topic per selected Codex thread and runs the same listen/send flow for each of them concurrently.
+- `hand-off` names each Telegram topic as `<last cwd folder> | <thread name>`, falling back to the short thread ID when a thread name is missing.
+- `hand-off` uses one shared Telegram Bot API polling loop for all attached threads so updates are consumed once and dispatched to the matching Codex thread binding.
+- before `hand-off` creates a new set of Telegram topics in the target chat, it deletes previously tracked Telegram topics for that same chat and clears their local session bindings.
 - `listen-and-send` does not reuse an active in-flight turn. This keeps terminal input on the explicit `turn_start_options` path from `config.toml`.
 - when `listen-and-send` starts a new turn on a thread, it forwards configured `turn_start_options` from `config.toml` into `turn/start`. This is the deterministic way to keep new terminal-started turns on the configured approval and sandbox defaults.
 - when `listen-and-send` is attached to an interactive TTY, it keeps a stable bottom input prompt and prints new thread output above it.
 - if the App Server requests command approval during `listen-and-send`, the CLI prints the approval reason and command, then waits for a terminal reply such as `approve` or `cancel`.
+- in Telegram private-thread mode, the run starts in the configured private chat and adopts the first seen `message_thread_id` for that run when Telegram includes one.
+- once a Telegram `message_thread_id` has been observed for the run, only messages from that same private thread are accepted as operator input.
+- in Telegram mode, role prefixes such as `user`, `approval`, and `assistant/commentary` are rendered in bold, and approval prompts use Telegram reply-keyboard buttons such as `approve`, `approve-amend`, and `cancel`.
 - `listen-and-send` exits cleanly on EOF, so `Ctrl-D` ends the session.
 - use `--no-history` if you only want future messages after the listener attaches.
 - use `--history-limit` to control how many recent messages are replayed first. The default is `20`, and older backlog messages remain suppressed unless they are part of the selected replay window.
@@ -135,6 +163,7 @@ The registry stores:
 - turn snapshots
 - connection state
 - append-only `events.jsonl`
+- Telegram session snapshots, including the bound chat, optional private-chat `message_thread_id`, and update offset for the current run
 
 This state is a cache and recovery aid, not the primary protocol surface.
 
