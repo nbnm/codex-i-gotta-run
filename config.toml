@@ -14,6 +14,22 @@ name = "codex-i-gotta-run"
 title = "codex-i-gotta-run"
 version = "0.1.0"
 
+[telegram]
+# Set directly for local testing, or prefer `bot_token_env` for a secret from the shell environment.
+bot_token = "8248371549:AAEzHgargDaDKgmTMjU7T8tC4NEasm2bU50"
+# Example: export TELEGRAM_BOT_TOKEN=123456:abc...
+bot_token_env = "TELEGRAM_BOT_TOKEN"
+# Optional override for local proxies or testing.
+api_base_url = "https://api.telegram.org"
+# Long-poll timeout in seconds for getUpdates.
+poll_timeout_seconds = 30
+# Restrict access to specific Telegram chats when desired.
+allowed_chat_ids = [208920039]
+# Restrict access to specific Telegram usernames when desired.
+allowed_usernames = ["@neither_be_nor_me"]
+# Optional eager binding for a single operator chat.
+default_chat_id = 208920039
+
 [turn_start_options]
 sandbox_mode = "danger-full-access"
 approval_policy = "never"

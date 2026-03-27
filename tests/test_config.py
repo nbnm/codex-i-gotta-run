@@ -37,3 +37,57 @@ def test_load_config_ignores_legacy_sidecar_environment_variables(tmp_path: Path
 
     assert config.app_server_command == []
     assert config.data_dir != (tmp_path / "legacy-registry").resolve()
+
+
+def test_load_config_parses_telegram_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[server]",
+                'command = ["python3", "-m", "tests.fake_app_server"]',
+                "",
+                "[registry]",
+                'data_dir = "./registry"',
+                "",
+                "[telegram]",
+                'bot_token = "test-token"',
+                'default_chat_id = 777',
+                "allowed_chat_ids = [777, 888]",
+                'allowed_usernames = ["oleg"]',
+                "poll_timeout_seconds = 10",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.telegram.bot_token == "test-token"
+    assert config.telegram.default_chat_id == 777
+    assert config.telegram.allowed_chat_ids == [777, 888]
+    assert config.telegram.allowed_usernames == ["oleg"]
+    assert config.telegram.poll_timeout_seconds == 10
+
+
+def test_load_config_resolves_telegram_bot_token_from_explicit_env_reference(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[telegram]",
+                'bot_token_env = "TELEGRAM_BOT_TOKEN"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env-token")
+
+    config = load_config(config_path)
+
+    assert config.telegram.bot_token == "env-token"

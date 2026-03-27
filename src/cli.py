@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import sys
 from collections.abc import Awaitable, Callable
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,6 +16,7 @@ from config import load_config
 from logging_utils import configure_logging
 from models import EventRecord, ThreadRecord, TurnRecord
 from service import OrchestratorService
+from telegram_integration import HttpTelegramBotApi, TelegramOperatorBridge
 from transport import UNHANDLED
 
 try:
@@ -32,6 +34,11 @@ ConfigOption = Annotated[
     Path | None,
     typer.Option("--config", help="Path to a TOML config file. Defaults to ./config.toml when present."),
 ]
+
+
+class OperatorInterface(str, Enum):
+    CLI = "cli"
+    TELEGRAM = "telegram"
 
 
 def _build_service(config_path: Path | None) -> OrchestratorService:
@@ -146,19 +153,7 @@ def _available_approval_decisions(params: dict[str, Any]) -> list[Any]:
 
 
 def _approval_help_text(params: dict[str, Any]) -> str:
-    decisions = _available_approval_decisions(params)
-    labels: list[str] = []
-    for decision in decisions:
-        if decision == "accept":
-            labels.append("approve")
-        elif decision == "acceptForSession":
-            labels.append("approve-session")
-        elif decision == "decline":
-            labels.append("decline")
-        elif decision == "cancel":
-            labels.append("cancel")
-        elif isinstance(decision, dict) and "acceptWithExecpolicyAmendment" in decision:
-            labels.append("approve-amend")
+    labels = _approval_button_labels(params)
     if not labels:
         labels = ["approve", "cancel"]
     return ", ".join(labels)
@@ -185,6 +180,29 @@ def _parse_approval_input(text: str, params: dict[str, Any]) -> Any | None:
     if not decisions and normalized in {"cancel", "/cancel", "decline", "/decline", "n", "no"}:
         return {"decision": "cancel"}
     return None
+
+
+def _approval_button_labels(params: dict[str, Any]) -> list[str]:
+    decisions = _available_approval_decisions(params)
+    labels: list[str] = []
+    for decision in decisions:
+        if decision == "accept":
+            labels.append("approve")
+        elif decision == "acceptForSession":
+            labels.append("approve-session")
+        elif decision == "decline":
+            labels.append("decline")
+        elif decision == "cancel":
+            labels.append("cancel")
+        elif isinstance(decision, dict) and "acceptWithExecpolicyAmendment" in decision:
+            labels.append("approve-amend")
+    return labels
+
+
+async def _emit_output(text: str, telegram_bridge: TelegramOperatorBridge | None) -> None:
+    console.print(text)
+    if telegram_bridge is not None:
+        await telegram_bridge.send_text(text)
 
 
 @app.command(help="List known threads from the App Server and refresh the local registry cache.")
@@ -319,6 +337,14 @@ def listen(
 @app.command(name="listen-and-send", help="Listen to a thread and start a new turn for each line typed into the terminal.")
 def listen_and_send(
     thread_id: str,
+    interface: Annotated[
+        OperatorInterface,
+        typer.Option("--interface", help="Operator interface for output and follow-up input."),
+    ] = OperatorInterface.CLI,
+    telegram_chat_id: Annotated[
+        int | None,
+        typer.Option("--telegram-chat-id", help="Bind the Telegram interface to this chat ID immediately."),
+    ] = None,
     max_events: Annotated[int | None, typer.Option("--max-events", help="Stop after this many live events.")] = None,
     no_history: Annotated[bool, typer.Option("--no-history", help="Skip replaying recent thread messages before listening.")] = False,
     history_limit: Annotated[int, typer.Option("--history-limit", help="Number of most recent messages to replay before listening.")] = 20,
@@ -331,13 +357,32 @@ def listen_and_send(
     async def operation(service: OrchestratorService) -> None:
         await service.connect()
         console.print(f"Listening and sending on thread {thread_id}")
-        console.print("Type a line and press Enter to start a new turn. Send EOF to exit.")
+        telegram_bridge: TelegramOperatorBridge | None = None
+        if interface == OperatorInterface.TELEGRAM:
+            if not service.config.telegram.enabled:
+                raise RuntimeError("Telegram interface requested but [telegram].bot_token is not configured.")
+            service.registry.delete_telegram_session(thread_id)
+            telegram_bridge = TelegramOperatorBridge(
+                thread_id=thread_id,
+                registry=service.registry,
+                config=service.config.telegram,
+                api=HttpTelegramBotApi(service.config.telegram),
+                chat_id=telegram_chat_id,
+            )
+            await telegram_bridge.start()
+            await _emit_output("Telegram interface is active for this thread.", telegram_bridge)
+        else:
+            console.print("Type a line and press Enter to start a new turn. Send EOF to exit.")
         seen_message_ids: set[str] = set()
         approval_queue: asyncio.Queue[tuple[dict[str, Any], asyncio.Future[dict[str, Any]]]] = asyncio.Queue()
         active_approval: tuple[dict[str, Any], asyncio.Future[dict[str, Any]]] | None = None
         interactive_prompt = (
             PromptSession(PROMPT_TEXT)
-            if PromptSession is not None and patch_stdout is not None and sys.stdin.isatty() and sys.stdout.isatty()
+            if interface == OperatorInterface.CLI
+            and PromptSession is not None
+            and patch_stdout is not None
+            and sys.stdin.isatty()
+            and sys.stdout.isatty()
             else None
         )
 
@@ -365,13 +410,13 @@ def listen_and_send(
                 for message_id, text in messages[-history_limit:]:
                     if message_id in already_seen:
                         continue
-                    console.print(text)
+                    await _emit_output(text, telegram_bridge)
                     printed += 1
                 return printed
             for message_id, text in messages:
                 if message_id in seen_message_ids:
                     continue
-                console.print(text)
+                await _emit_output(text, telegram_bridge)
                 seen_message_ids.add(message_id)
                 printed += 1
             return printed
@@ -407,10 +452,17 @@ def listen_and_send(
                 params, response_future = active_approval
                 reason = params.get("reason") or "Approval requested."
                 command = params.get("command") or ""
-                console.print(f"approval: {reason}")
+                if telegram_bridge is not None:
+                    await telegram_bridge.send_text(
+                        f"approval: {reason}",
+                        buttons=_approval_button_labels(params) or ["approve", "cancel"],
+                    )
+                else:
+                    await _emit_output(f"approval: {reason}", telegram_bridge)
                 if command:
-                    console.print(f"command: {command}")
-                console.print(f"reply with: {_approval_help_text(params)}")
+                    await _emit_output(f"command: {command}", telegram_bridge)
+                if telegram_bridge is None:
+                    await _emit_output(f"reply with: {_approval_help_text(params)}", telegram_bridge)
                 try:
                     await asyncio.shield(response_future)
                 finally:
@@ -428,14 +480,16 @@ def listen_and_send(
             if live_message is not None:
                 message_id, text = live_message
                 if message_id not in seen_message_ids:
-                    console.print(text)
+                    await _emit_output(text, telegram_bridge)
                     seen_message_ids.add(message_id)
                 return
             await sync_messages(print_history=False)
 
         async def input_loop() -> None:
             while True:
-                if interactive_prompt is not None:
+                if telegram_bridge is not None:
+                    line = await telegram_bridge.read_input()
+                elif interactive_prompt is not None:
                     try:
                         line = await interactive_prompt.prompt_async()
                     except EOFError:
@@ -451,22 +505,28 @@ def listen_and_send(
                     params, response_future = active_approval
                     decision = _parse_approval_input(prompt, params)
                     if decision is None:
-                        console.print(f"invalid approval response; reply with: {_approval_help_text(params)}")
+                        await _emit_output(
+                            f"invalid approval response; reply with: {_approval_help_text(params)}",
+                            telegram_bridge,
+                        )
                         continue
                     response_future.set_result(decision)
-                    console.print(f"approval sent: {decision['decision']}")
+                    if telegram_bridge is not None:
+                        await telegram_bridge.send_text(f"approval sent: {decision['decision']}", clear_buttons=True)
+                    else:
+                        await _emit_output(f"approval sent: {decision['decision']}", telegram_bridge)
                     continue
                 try:
                     input_busy.set()
                     accepted_turn_id, action_label = await send_prompt_to_thread(prompt)
-                    await sync_messages(print_history=False)
                     user_message_id = _message_key(accepted_turn_id, "user", prompt)
                     if user_message_id not in seen_message_ids:
                         seen_message_ids.add(user_message_id)
-                        console.print(f"user: {prompt}")
-                    console.print(action_label)
+                        await _emit_output(f"user: {prompt}", telegram_bridge)
+                    await sync_messages(print_history=False)
+                    await _emit_output(action_label, telegram_bridge)
                 except Exception as exc:  # noqa: BLE001
-                    console.print(f"Send failed: {exc}")
+                    await _emit_output(f"Send failed: {exc}", telegram_bridge)
                     continue
                 finally:
                     input_busy.clear()
@@ -514,6 +574,8 @@ def listen_and_send(
                     await refresh_task
                 with contextlib.suppress(asyncio.CancelledError):
                     await approval_task
+                if telegram_bridge is not None:
+                    await telegram_bridge.close()
 
     _run(_execute_with_service(config, operation))
 

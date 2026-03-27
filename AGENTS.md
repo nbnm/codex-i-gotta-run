@@ -76,6 +76,7 @@ The current local-only tool is successful if it can:
 6. start a turn on a known thread
 7. receive and persist live events
 8. recover local state after restart
+9. expose the same listen/send workflow through Telegram as an alternate operator interface to the CLI when explicitly requested
 
 ## Out of scope for v0
 
@@ -94,6 +95,14 @@ Do not build these yet:
 
 Document future ideas, but do not implement them.
 
+Telegram integration is now in scope for the local operator path only.
+That means:
+- Telegram is an alternate interface for `listen-and-send`, not a replacement control plane
+- the sidecar still talks only to the local Codex App Server
+- Telegram does not add multi-user workflow, remote orchestration, or autonomous routing in v0
+- start with Telegram Bot API polling from the local sidecar process
+- webhook mode may be documented as a future option, but not implemented in the current scope unless requested separately
+
 ## Core design principles
 
 - Treat App Server as the live truth.
@@ -104,6 +113,7 @@ Document future ideas, but do not implement them.
 - Maintain one active-turn record per thread.
 - Make terminal send and approval behavior explainable and auditable.
 - Keep all commands restart-safe and idempotent where possible.
+- Keep external chat integrations transport-only: they may carry operator input and output, but thread and turn truth still comes from the App Server.
 
 ## Repository conventions
 
@@ -116,7 +126,7 @@ Document future ideas, but do not implement them.
 - Logging: structured stdlib `logging`.
 - Runtime model: one local async `asyncio` process for transport, ingestion, and command execution.
 - Configuration source: local TOML config file selected by CLI, then code defaults.
-- Environment variables are not part of runtime configuration.
+- Environment variables are not part of runtime configuration, except when the config file explicitly references a secret such as `telegram.bot_token_env`.
 - Favor explicit typed domain models and conservative protocol adapters over dynamic or implicit behavior.
 
 Suggested repo layout:
@@ -268,6 +278,7 @@ Required commands:
 - `listen <threadId>` - print recent thread messages first, then newly detected messages to the local console; support skipping history and limiting replay depth when requested, without replaying the older backlog again after resume, and use periodic refresh as a fallback when live message events are not emitted
 - `listen-and-send <threadId>` - run the same live listening flow as `listen`, while also accepting terminal input and sending each typed line as a fresh next turn on that thread; do not reuse an in-flight turn from the terminal path, and surface command-approval requests in the console when they occur
 - `listen-and-send` should keep a stable bottom input line in interactive terminals while new output prints above it
+- `listen-and-send --interface telegram <threadId>` - run the same live listening flow, but route operator-visible output and operator replies through Telegram instead of stdin/stdout; the sidecar should start a local Telegram bridge process inside the same runtime and preserve enough binding state to recover after restart
 - `doctor` - validate config file, local server command, and connectivity
 
 Optional later:
@@ -304,6 +315,17 @@ Rules:
 - if the App Server pauses for command approval, the CLI must surface the prompt and wait for a reply
 - if state is stale or uncertain for message display, refresh via `read_thread()` rather than guessing
 
+### Telegram Send
+
+Telegram mode follows the same turn semantics as terminal mode.
+
+Rules:
+- each accepted Telegram text message starts the next explicit `turn/start` on the same thread unless the sidecar is currently waiting for an approval response
+- when approval is pending, Telegram replies such as `approve` or `cancel` must answer that approval request instead of starting a new turn
+- Telegram mode must use the same `turn_start_options` forwarding as terminal mode
+- Telegram binding state should be persisted locally so the sidecar can recover the chat association and update offset after restart
+- Telegram authorization should be explicit through config and deterministic chat binding, not inferred from ambient traffic
+
 ## Testing requirements
 
 At minimum, cover:
@@ -318,6 +340,7 @@ At minimum, cover:
 - CLI command behavior for local operator workflows
 
 Prefer an in-process fake JSON-RPC App Server for tests over real-server-only testing.
+Prefer fake Telegram API clients for Telegram tests over live Telegram network calls.
 
 ## Change discipline
 

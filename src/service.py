@@ -92,6 +92,12 @@ class OrchestratorService:
         checks: dict[str, Any] = {
             "data_dir": {"ok": True, "path": str(self.config.data_dir)},
             "server_command": {"ok": bool(self.config.app_server_command), "value": self.config.app_server_instance},
+            "telegram": {
+                "ok": True if not self.config.telegram.enabled else bool(self.config.telegram.bot_token),
+                "enabled": self.config.telegram.enabled,
+                "default_chat_id": self.config.telegram.default_chat_id,
+                "allowed_chat_ids": len(self.config.telegram.allowed_chat_ids),
+            },
         }
         if self.config.app_server_command:
             try:

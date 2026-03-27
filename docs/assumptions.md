@@ -19,5 +19,9 @@ Implementation assumptions recorded here:
 9. When the App Server sends `item/commandExecution/requestApproval`, the CLI treats it as a server-initiated JSON-RPC request, prints the approval prompt to the terminal, and replies with an explicit approval decision such as `accept` or `cancel`.
 10. App Server stderr output may contain internal warnings unrelated to the current thread, so it is suppressed at normal log levels and only surfaced through debug logging.
 11. The current implementation is local-server-only. Remote App Server targets are out of scope unless the docs are updated explicitly.
-12. Runtime configuration comes from the local TOML config file and code defaults. Environment-variable configuration is intentionally not supported.
+12. Runtime configuration comes from the local TOML config file and code defaults. Environment-variable configuration is intentionally not supported, except for explicit config-file secret references such as `telegram.bot_token_env`.
 13. Advanced or experimental surfaces such as dynamic tools, WebSocket transport, reviews, rollback, archive, and compaction are intentionally not implemented in the current scope.
+14. Telegram is treated as an alternate local operator transport for `listen-and-send`, not as a separate workflow engine. The Codex App Server remains the only live source of thread and turn truth.
+15. The initial Telegram implementation uses Telegram Bot API polling from the local sidecar process and persists the bound chat ID plus the last consumed `update_id` in the local registry so the bridge can recover cleanly after restart.
+16. If no explicit Telegram chat is configured, the initial authorized inbound Telegram message becomes the bound chat for that thread session. Outbound messages detected before that bind are buffered locally and flushed once the chat is attached.
+17. Telegram approvals reuse the same decision parsing as terminal approvals: while approval is pending, messages such as `approve` and `cancel` are treated as approval responses instead of new turns.
